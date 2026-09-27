@@ -1,0 +1,67 @@
+<ui:FluentWindow x:Class="SplateClientDesktop.Views.AddSubscriptionWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        Title="Добавление подписки" 
+        Height="310" Width="480"
+        WindowStartupLocation="CenterOwner"
+        ExtendsContentIntoTitleBar="True"
+        WindowBackdropType="Mica"
+        ResizeMode="NoResize">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <ui:TitleBar Grid.Row="0" Title="Новая подписка" CloseWindowByDoubleClickOnIcon="False"/>
+
+        <Grid Grid.Row="1" Margin="22,8,22,18">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- Name -->
+            <StackPanel Grid.Row="0" Margin="0,0,0,12">
+                <TextBlock Text="Название подписки" FontSize="11.5" FontWeight="SemiBold" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,4"/>
+                <ui:TextBox x:Name="TxtSubName" PlaceholderText="Например: Моя подписка или Серверы РФ" Height="34" FontSize="12"/>
+            </StackPanel>
+
+            <!-- URL -->
+            <StackPanel Grid.Row="1" Margin="0,0,0,12">
+                <TextBlock Text="Ссылка на подписку (URL)" FontSize="11.5" FontWeight="SemiBold" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,4"/>
+                <ui:TextBox x:Name="TxtSubUrl" PlaceholderText="https://example.com/api/v1/client/subscribe?token=..." Height="34" FontSize="12"/>
+            </StackPanel>
+
+            <!-- Auto Update -->
+            <Grid Grid.Row="2" Margin="0,0,0,16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="Автообновление подписки" FontSize="12" FontWeight="SemiBold"/>
+                    <TextBlock Text="Периодически проверять и обновлять узлы" FontSize="10.5" Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+                </StackPanel>
+                <ui:ToggleSwitch Grid.Column="1" x:Name="TglAutoUpdate" IsChecked="True" Margin="0"/>
+            </Grid>
+
+            <!-- Buttons -->
+            <Grid Grid.Row="4">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="10"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <ui:Button Grid.Column="0" Content="Отмена" Appearance="Secondary" Height="36" HorizontalAlignment="Stretch" Click="Cancel_Click"/>
+                <ui:Button Grid.Column="2" Content="Сохранить и загрузить" Appearance="Primary" Height="36" HorizontalAlignment="Stretch" Click="Save_Click"/>
+            </Grid>
+        </Grid>
+    </Grid>
+</ui:FluentWindow>

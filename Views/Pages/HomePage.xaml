@@ -1,0 +1,661 @@
+<Page x:Class="SplateClientDesktop.Views.Pages.HomePage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+      xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+      xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+      xmlns:viewmodels="clr-namespace:SplateClientDesktop.ViewModels"
+      mc:Ignorable="d" 
+      d:DesignHeight="700" d:DesignWidth="800"
+      Title="Home">
+
+    <Page.Resources>
+        <!-- Orb Glow Gradients -->
+        <LinearGradientBrush x:Key="ConnectedGlow" StartPoint="0,0" EndPoint="1,1">
+            <GradientStop Color="#10B981" Offset="0"/>
+            <GradientStop Color="#059669" Offset="0.6"/>
+            <GradientStop Color="#047857" Offset="1"/>
+        </LinearGradientBrush>
+        
+        <LinearGradientBrush x:Key="DisconnectedGlow" StartPoint="0,0" EndPoint="1,1">
+            <GradientStop Color="#374151" Offset="0"/>
+            <GradientStop Color="#1F2937" Offset="1"/>
+        </LinearGradientBrush>
+
+        <LinearGradientBrush x:Key="ConnectingGlow" StartPoint="0,0" EndPoint="1,1">
+            <GradientStop Color="#F59E0B" Offset="0"/>
+            <GradientStop Color="#D97706" Offset="1"/>
+        </LinearGradientBrush>
+
+        <!-- Outer Auras -->
+        <RadialGradientBrush x:Key="GreenAura" GradientOrigin="0.5,0.5" Center="0.5,0.5" RadiusX="0.5" RadiusY="0.5">
+            <GradientStop Color="#3810B981" Offset="0"/>
+            <GradientStop Color="#1210B981" Offset="0.65"/>
+            <GradientStop Color="#00000000" Offset="1"/>
+        </RadialGradientBrush>
+
+        <RadialGradientBrush x:Key="GrayAura" GradientOrigin="0.5,0.5" Center="0.5,0.5" RadiusX="0.5" RadiusY="0.5">
+            <GradientStop Color="#1A6B7280" Offset="0"/>
+            <GradientStop Color="#086B7280" Offset="0.65"/>
+            <GradientStop Color="#00000000" Offset="1"/>
+        </RadialGradientBrush>
+
+        <RadialGradientBrush x:Key="AmberAura" GradientOrigin="0.5,0.5" Center="0.5,0.5" RadiusX="0.5" RadiusY="0.5">
+            <GradientStop Color="#38F59E0B" Offset="0"/>
+            <GradientStop Color="#12F59E0B" Offset="0.65"/>
+            <GradientStop Color="#00000000" Offset="1"/>
+        </RadialGradientBrush>
+
+        <!-- Button Gradient Brushes -->
+        <LinearGradientBrush x:Key="ConnectBtnBrush" StartPoint="0,0" EndPoint="1,1">
+            <GradientStop Color="#10B981" Offset="0"/>
+            <GradientStop Color="#059669" Offset="1"/>
+        </LinearGradientBrush>
+
+        <LinearGradientBrush x:Key="DisconnectBtnBrush" StartPoint="0,0" EndPoint="1,1">
+            <GradientStop Color="#E11D48" Offset="0"/>
+            <GradientStop Color="#BE123C" Offset="1"/>
+        </LinearGradientBrush>
+
+        <LinearGradientBrush x:Key="ConnectingBtnBrush" StartPoint="0,0" EndPoint="1,1">
+            <GradientStop Color="#F59E0B" Offset="0"/>
+            <GradientStop Color="#D97706" Offset="1"/>
+        </LinearGradientBrush>
+
+        <Style x:Key="SpeedValue" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="20"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="FontFamily" Value="Segoe UI Variable Display, Segoe UI"/>
+        </Style>
+
+        <Style x:Key="CardLabel" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="10"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorTertiaryBrush}"/>
+        </Style>
+    </Page.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="18,12,18,16">
+        <StackPanel>
+            
+            <!-- App Update Banner -->
+            <Grid Margin="0,0,0,12">
+                <Grid.Style>
+                    <Style TargetType="Grid">
+                        <Setter Property="Visibility" Value="Collapsed"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsAppUpdateAvailable}" Value="True">
+                                <Setter Property="Visibility" Value="Visible"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Grid.Style>
+                <ui:Card Padding="14,10" Background="#1810B981" BorderBrush="#4410B981">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <ui:SymbolIcon Symbol="ArrowDownload24" FontSize="20" Foreground="#10B981" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                            <TextBlock Text="Доступно обновление SplateVPN" FontWeight="SemiBold" FontSize="12.5" Foreground="#10B981"/>
+                            <TextBlock Text="{Binding AppUpdateMessage}" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,1,0,0"/>
+                        </StackPanel>
+                        <ui:Button Grid.Column="2" Content="Скачать" Command="{Binding OpenUrlCommand}" CommandParameter="{Binding AppUpdateUrl}" Appearance="Primary" Padding="12,5" VerticalAlignment="Center"/>
+                    </Grid>
+                </ui:Card>
+            </Grid>
+
+            <!-- Dashboard 2-Column Grid (Balanced & Modern) -->
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="1*"/>
+                    <ColumnDefinition Width="14"/>
+                    <ColumnDefinition Width="1*"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- ========================================== -->
+                <!-- LEFT COLUMN: Hero Orb, Server & Egress IP  -->
+                <!-- ========================================== -->
+                <StackPanel Grid.Column="0">
+                    
+                    <!-- Main Hero Connection Card -->
+                    <ui:Card Padding="16,14" Margin="0,0,0,12">
+                        <StackPanel>
+                            
+                            <!-- Glowing Orb Centerpiece -->
+                            <Grid Width="116" Height="116" Margin="0,0,0,10" HorizontalAlignment="Center">
+                                <!-- Ambient Aura -->
+                                <Ellipse Width="116" Height="116">
+                                    <Ellipse.Style>
+                                        <Style TargetType="Ellipse">
+                                            <Setter Property="Fill" Value="{StaticResource GrayAura}"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsConnected}" Value="True">
+                                                    <Setter Property="Fill" Value="{StaticResource GreenAura}"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Ellipse.Style>
+                                </Ellipse>
+
+                                <!-- Button Target -->
+                                <Button Command="{Binding ToggleConnectionCommand}"
+                                        Width="90" Height="90"
+                                        Cursor="Hand">
+                                    <Button.Template>
+                                        <ControlTemplate TargetType="Button">
+                                            <Grid>
+                                                <!-- Outer Accent Ring -->
+                                                <Ellipse StrokeThickness="2">
+                                                    <Ellipse.Style>
+                                                        <Style TargetType="Ellipse">
+                                                            <Setter Property="Stroke" Value="#25FFFFFF"/>
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsConnected}" Value="True">
+                                                                    <Setter Property="Stroke" Value="#6610B981"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </Ellipse.Style>
+                                                </Ellipse>
+
+                                                <!-- Inner Disc -->
+                                                <Ellipse Width="78" Height="78">
+                                                    <Ellipse.Style>
+                                                        <Style TargetType="Ellipse">
+                                                            <Setter Property="Fill" Value="{StaticResource DisconnectedGlow}"/>
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsConnected}" Value="True">
+                                                                    <Setter Property="Fill" Value="{StaticResource ConnectedGlow}"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </Ellipse.Style>
+                                                </Ellipse>
+
+                                                <!-- Center Icon -->
+                                                <ui:SymbolIcon Symbol="Shield24" FontSize="30" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                    <ui:SymbolIcon.Style>
+                                                        <Style TargetType="ui:SymbolIcon">
+                                                            <Setter Property="Foreground" Value="#9CA3AF"/>
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsConnected}" Value="True">
+                                                                    <Setter Property="Foreground" Value="White"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </ui:SymbolIcon.Style>
+                                                </ui:SymbolIcon>
+                                            </Grid>
+                                        </ControlTemplate>
+                                    </Button.Template>
+                                </Button>
+                            </Grid>
+
+                            <!-- Status Headline -->
+                            <TextBlock Text="{Binding StatusText}" 
+                                       FontSize="16.5" FontWeight="Bold" 
+                                       HorizontalAlignment="Center" 
+                                       Margin="0,0,0,2">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsConnected}" Value="True">
+                                                <Setter Property="Foreground" Value="#34D399"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+
+                            <!-- Session / Connection Detail -->
+                            <TextBlock FontSize="11" 
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                       HorizontalAlignment="Center" 
+                                       Margin="0,0,0,12"
+                                       Text="{Binding ConnectionDetail}"/>
+
+                            <!-- Main Action Button -->
+                            <Button Command="{Binding ToggleConnectionCommand}"
+                                    HorizontalAlignment="Stretch"
+                                    Height="40"
+                                    Cursor="Hand">
+                                <Button.Template>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border x:Name="BtnBorder" CornerRadius="8" 
+                                                Background="{StaticResource ConnectBtnBrush}"
+                                                BorderBrush="#40FFFFFF" BorderThickness="1">
+                                            <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <ui:SymbolIcon x:Name="BtnIcon" Symbol="Shield24" FontSize="17" VerticalAlignment="Center" Margin="0,0,7,0" Foreground="White"/>
+                                                <TextBlock Grid.Column="1" x:Name="BtnText" Text="Подключиться" FontSize="13.5" FontWeight="Bold" Foreground="White" VerticalAlignment="Center"/>
+                                            </Grid>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <DataTrigger Binding="{Binding IsConnected}" Value="True">
+                                                <Setter TargetName="BtnBorder" Property="Background" Value="{StaticResource DisconnectBtnBrush}"/>
+                                                <Setter TargetName="BtnBorder" Property="BorderBrush" Value="#40F43F5E"/>
+                                                <Setter TargetName="BtnIcon" Property="Symbol" Value="Power24"/>
+                                                <Setter TargetName="BtnText" Property="Text" Value="Отключиться"/>
+                                            </DataTrigger>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="BtnBorder" Property="Opacity" Value="0.92"/>
+                                            </Trigger>
+                                            <Trigger Property="IsPressed" Value="True">
+                                                <Setter TargetName="BtnBorder" Property="Opacity" Value="0.82"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Button.Template>
+                            </Button>
+
+                            <!-- Quick Meta Badges -->
+                            <Border Margin="0,10,0,0" Padding="8,6" Background="#0CFFFFFF" CornerRadius="7" BorderThickness="1" BorderBrush="#10FFFFFF">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="1"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="1"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    
+                                    <!-- Protocol -->
+                                    <StackPanel Grid.Column="0" HorizontalAlignment="Center">
+                                        <TextBlock Text="ПРОТОКОЛ" FontSize="8.5" FontWeight="Bold" Foreground="{DynamicResource TextFillColorTertiaryBrush}" HorizontalAlignment="Center"/>
+                                        <TextBlock Text="{Binding SelectedServer.ProtocolUpper, FallbackValue='VLESS'}" FontSize="10.5" FontWeight="SemiBold" Foreground="{DynamicResource TextFillColorSecondaryBrush}" HorizontalAlignment="Center" Margin="0,2,0,0"/>
+                                    </StackPanel>
+
+                                    <Rectangle Grid.Column="1" Fill="#15FFFFFF" VerticalAlignment="Stretch"/>
+
+                                    <!-- Inbound Mode -->
+                                    <StackPanel Grid.Column="2" HorizontalAlignment="Center">
+                                        <TextBlock Text="АДАПТЕР" FontSize="8.5" FontWeight="Bold" Foreground="{DynamicResource TextFillColorTertiaryBrush}" HorizontalAlignment="Center"/>
+                                        <TextBlock FontSize="10.5" FontWeight="SemiBold" Foreground="{DynamicResource TextFillColorSecondaryBrush}" HorizontalAlignment="Center" Margin="0,2,0,0">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Text" Value="WinINet"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding EnableTunMode}" Value="True">
+                                                            <Setter Property="Text" Value="Wintun TUN"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </StackPanel>
+
+                                    <Rectangle Grid.Column="3" Fill="#15FFFFFF" VerticalAlignment="Stretch"/>
+
+                                    <!-- DNS Protection -->
+                                    <StackPanel Grid.Column="4" HorizontalAlignment="Center">
+                                        <TextBlock Text="DNS ЗАЩИТА" FontSize="8.5" FontWeight="Bold" Foreground="{DynamicResource TextFillColorTertiaryBrush}" HorizontalAlignment="Center"/>
+                                        <TextBlock FontSize="10.5" FontWeight="SemiBold" Foreground="#34D399" HorizontalAlignment="Center" Margin="0,2,0,0">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Text" Value="DoH 1.1.1.1"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsFakeDns}" Value="True">
+                                                            <Setter Property="Text" Value="FakeDNS"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+
+                        </StackPanel>
+                    </ui:Card>
+
+                    <!-- Active Server Card -->
+                    <ui:Card Padding="12,10" Margin="0,0,0,12">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <Border Width="34" Height="34" CornerRadius="8" Margin="0,0,9,0" VerticalAlignment="Center">
+                                <Border.Background>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                        <GradientStop Color="#1E293B" Offset="0"/>
+                                        <GradientStop Color="#312E81" Offset="1"/>
+                                    </LinearGradientBrush>
+                                </Border.Background>
+                                <ui:SymbolIcon Symbol="Globe24" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#A5B4FC"/>
+                            </Border>
+
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,6,0">
+                                <TextBlock Text="{Binding SelectedServer.DisplayName, FallbackValue='Сервер не выбран'}" FontSize="12.5" FontWeight="Bold" TextTrimming="CharacterEllipsis"/>
+                                <TextBlock Text="{Binding SelectedServer.DisplaySubtitle, FallbackValue='Выберите сервер в списке'}" FontSize="10" Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" Margin="0,1,0,0"/>
+                            </StackPanel>
+
+                            <!-- Ping Pill -->
+                            <Border Grid.Column="2" CornerRadius="5" Padding="7,3" Margin="2,0,6,0" VerticalAlignment="Center" Background="#1510B981" BorderBrush="#3010B981" BorderThickness="1">
+                                <TextBlock Text="{Binding SelectedServer.PingDisplay, FallbackValue='—'}" FontSize="11" FontWeight="Bold" Foreground="#34D399"/>
+                            </Border>
+
+                            <!-- Change and Paste buttons -->
+                            <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
+                                <ui:Button Appearance="Secondary" Padding="8,5" Margin="0,0,6,0"
+                                           Command="{Binding AddFromClipboardCommand}" ToolTip="Вставить vless/trojan/vmess узел или ссылку подписки из буфера обмена">
+                                    <StackPanel Orientation="Horizontal">
+                                        <ui:SymbolIcon Symbol="ClipboardPaste24" FontSize="12" Foreground="#34D399" Margin="0,0,4,0"/>
+                                        <TextBlock Text="Вставить" FontSize="11"/>
+                                    </StackPanel>
+                                </ui:Button>
+                                <ui:Button Content="Сменить" Command="{Binding NavigateToServersCommand}" Appearance="Secondary" Padding="8,5"/>
+                            </StackPanel>
+                        </Grid>
+                    </ui:Card>
+
+                    <!-- Real Egress IP & Geo Location Card -->
+                    <ui:Card Padding="14,12">
+                        <StackPanel>
+                            <Grid Margin="0,0,0,8">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <ui:SymbolIcon Symbol="Location24" FontSize="13" Foreground="#38BDF8" Margin="0,0,6,0"/>
+                                    <TextBlock Text="ВЫХОДНОЙ IP И ГЕОЛОКАЦИЯ" Style="{StaticResource CardLabel}"/>
+                                </StackPanel>
+                                <Button Command="{Binding RefreshIpDetailsCommand}"
+                                        HorizontalAlignment="Right" VerticalAlignment="Center"
+                                        Background="Transparent" BorderThickness="0" Cursor="Hand" Padding="4,2"
+                                        ToolTip="Проверить реальный IP и пинг соединения">
+                                    <StackPanel Orientation="Horizontal">
+                                        <ui:SymbolIcon Symbol="ArrowSync24" FontSize="12" Foreground="#38BDF8" Margin="0,0,4,0"/>
+                                        <TextBlock Text="Обновить" FontSize="10" FontWeight="SemiBold" Foreground="#38BDF8"/>
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+
+                            <Border Background="#0CFFFFFF" CornerRadius="8" Padding="12,10" BorderThickness="1" BorderBrush="#14FFFFFF">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <!-- Country Flag Big Badge -->
+                                    <Border Grid.Column="0" Width="38" Height="38" CornerRadius="8" Background="#1438BDF8" BorderBrush="#2538BDF8" BorderThickness="1" Margin="0,0,10,0" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding CountryFlag, FallbackValue='🌐'}" FontSize="20" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+
+                                    <!-- Country / Location details -->
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding CountryName, FallbackValue='Отключено'}" FontSize="13" FontWeight="Bold" Foreground="{DynamicResource TextFillColorPrimaryBrush}" TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Text="{Binding EgressLocation, FallbackValue='Прямое подключение'}" FontSize="10.5" Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
+                                        <TextBlock Text="{Binding EgressIp, FallbackValue='Не определен'}" FontSize="10" FontFamily="Cascadia Code, Consolas" Foreground="#38BDF8" Margin="0,2,0,0"/>
+                                    </StackPanel>
+
+                                    <!-- RTT latency indicator -->
+                                    <Border Grid.Column="2" CornerRadius="6" Padding="8,4" Background="#1410B981" BorderBrush="#3010B981" BorderThickness="1" VerticalAlignment="Center">
+                                        <StackPanel Orientation="Horizontal">
+                                            <ui:SymbolIcon Symbol="CheckmarkCircle24" FontSize="11" Foreground="#34D399" Margin="0,0,4,0" VerticalAlignment="Center"/>
+                                            <TextBlock Text="{Binding ConnectionRttDisplay, FallbackValue='—'}" FontSize="11" FontWeight="Bold" Foreground="#34D399" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+                    </ui:Card>
+
+                </StackPanel>
+
+                <!-- ============================================== -->
+                <!-- RIGHT COLUMN: Telemetry, Routing & Security    -->
+                <!-- ============================================== -->
+                <StackPanel Grid.Column="2">
+                    
+                    <!-- Traffic Monitoring Card -->
+                    <ui:Card Padding="16,12" Margin="0,0,0,12">
+                        <StackPanel>
+                            <Grid Margin="0,0,0,8">
+                                <TextBlock Text="СЕТЕВАЯ АКТИВНОСТЬ" Style="{StaticResource CardLabel}"/>
+                                <TextBlock FontSize="10" Foreground="{DynamicResource TextFillColorTertiaryBrush}" HorizontalAlignment="Right">
+                                    <Run Text="Сессия: "/><Run Text="{Binding SessionDuration, Mode=OneWay}"/>
+                                </TextBlock>
+                            </Grid>
+                            
+                            <!-- Speed Numbers -->
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="1" />
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+
+                                <!-- Download -->
+                                <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,2">
+                                        <ui:SymbolIcon Symbol="ArrowDown24" FontSize="13" Foreground="#34D399" Margin="0,0,3,0"/>
+                                        <TextBlock Text="Загрузка" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+                                    </StackPanel>
+                                    <TextBlock Text="{Binding DownloadSpeed}" Style="{StaticResource SpeedValue}" Foreground="#34D399"/>
+                                    <TextBlock FontSize="10" Foreground="{DynamicResource TextFillColorTertiaryBrush}" Margin="0,1,0,0">
+                                        <Run Text="Всего: "/><Run Text="{Binding SessionDownloaded, Mode=OneWay}"/>
+                                    </TextBlock>
+                                </StackPanel>
+
+                                <!-- Divider -->
+                                <Rectangle Grid.Column="1" Fill="#18FFFFFF" VerticalAlignment="Stretch"/>
+
+                                <!-- Upload -->
+                                <StackPanel Grid.Column="2" Margin="10,0,0,0">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,2">
+                                        <ui:SymbolIcon Symbol="ArrowUp24" FontSize="13" Foreground="#A78BFA" Margin="0,0,3,0"/>
+                                        <TextBlock Text="Отдача" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+                                    </StackPanel>
+                                    <TextBlock Text="{Binding UploadSpeed}" Style="{StaticResource SpeedValue}" Foreground="#A78BFA"/>
+                                    <TextBlock FontSize="10" Foreground="{DynamicResource TextFillColorTertiaryBrush}" Margin="0,1,0,0">
+                                        <Run Text="Всего: "/><Run Text="{Binding SessionUploaded, Mode=OneWay}"/>
+                                    </TextBlock>
+                                </StackPanel>
+                            </Grid>
+
+                            <!-- Live Waveform & Activity Graph -->
+                            <Border Background="#0CFFFFFF" CornerRadius="7" Padding="10,8" Margin="0,1,0,0" BorderThickness="1" BorderBrush="#14FFFFFF">
+                                <StackPanel>
+                                    <Grid Margin="0,0,0,5">
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <ui:SymbolIcon Symbol="Pulse24" FontSize="12" Foreground="{DynamicResource TextFillColorTertiaryBrush}" Margin="0,0,5,0"/>
+                                            <TextBlock Text="ГРАФИК СКОРОСТИ" FontSize="9" FontWeight="Bold" Foreground="{DynamicResource TextFillColorTertiaryBrush}"/>
+                                        </StackPanel>
+                                        <TextBlock Text="Live Realtime" FontSize="9" Foreground="{DynamicResource TextFillColorTertiaryBrush}" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                    </Grid>
+                                    
+                                    <!-- Waveform Canvas in Viewbox -->
+                                    <Viewbox Stretch="Fill" Height="36" Margin="0,0,0,6">
+                                        <Canvas Width="100" Height="40" ClipToBounds="True">
+                                            <!-- Grid lines -->
+                                            <Line X1="0" Y1="16" X2="100" Y2="16" Stroke="#0CFFFFFF" StrokeThickness="0.8" StrokeDashArray="3 3"/>
+                                            <Line X1="0" Y1="38" X2="100" Y2="38" Stroke="#15FFFFFF" StrokeThickness="0.8"/>
+                                            
+                                            <!-- Area gradient under curve -->
+                                            <Polygon Points="{Binding LiveDownloadAreaPoints}">
+                                                <Polygon.Fill>
+                                                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                                        <GradientStop Color="#3034D399" Offset="0"/>
+                                                        <GradientStop Color="#0034D399" Offset="1"/>
+                                                    </LinearGradientBrush>
+                                                </Polygon.Fill>
+                                            </Polygon>
+
+                                            <!-- Download line -->
+                                            <Polyline Points="{Binding LiveDownloadPoints}" Stroke="#34D399" StrokeThickness="1.6" StrokeLineJoin="Round"/>
+
+                                            <!-- Upload line -->
+                                            <Polyline Points="{Binding LiveUploadPoints}" Stroke="#A78BFA" StrokeThickness="1.2" StrokeLineJoin="Round" Opacity="0.85"/>
+                                        </Canvas>
+                                    </Viewbox>
+
+                                    <!-- Download Bar -->
+                                    <Grid Margin="0,0,0,2.5">
+                                        <ProgressBar Height="3" Minimum="0" Maximum="1" Value="{Binding DownloadSpeedRatio, Mode=OneWay}" 
+                                                     Foreground="#34D399" Background="#14FFFFFF" BorderThickness="0"/>
+                                    </Grid>
+                                    <!-- Upload Bar -->
+                                    <Grid>
+                                        <ProgressBar Height="3" Minimum="0" Maximum="1" Value="{Binding UploadSpeedRatio, Mode=OneWay}" 
+                                                     Foreground="#A78BFA" Background="#14FFFFFF" BorderThickness="0"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ui:Card>
+
+                    <!-- Traffic Routing Card -->
+                    <ui:Card Padding="16,12" Margin="0,0,0,12">
+                        <StackPanel>
+                            <TextBlock Text="МАРШРУТИЗАЦИЯ ТРАФИКА" Style="{StaticResource CardLabel}"/>
+                            
+                            <!-- TUN Mode Switch -->
+                            <Grid Margin="0,4,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="TUN Режим (Виртуальный адаптер)" FontSize="12" FontWeight="SemiBold"/>
+                                    <TextBlock FontSize="10" Foreground="{DynamicResource TextFillColorSecondaryBrush}">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Text" Value="🌐 Системный прокси (WinINet)"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding EnableTunMode}" Value="True">
+                                                        <Setter Property="Text" Value="⚡ TUN активен (Wintun — все приложения и игры)"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </StackPanel>
+                                <ui:ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableTunMode}" Margin="0"/>
+                            </Grid>
+
+                            <Separator Margin="0,0,0,8" Background="#14FFFFFF"/>
+
+                            <!-- Interactive Routing Mode Selector -->
+                            <TextBlock Text="Режим правил фильтрации" FontSize="12" FontWeight="SemiBold" Margin="0,0,0,5"/>
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="8"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+
+                                <!-- Smart RU Button -->
+                                <Border Grid.Column="0" CornerRadius="7" BorderThickness="1">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Background" Value="#0AFFFFFF"/>
+                                            <Setter Property="BorderBrush" Value="#15FFFFFF"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsSmartRouting}" Value="True">
+                                                    <Setter Property="Background" Value="#2210B981"/>
+                                                    <Setter Property="BorderBrush" Value="#6610B981"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <Button Command="{Binding SetRoutingModeCommand}" CommandParameter="smart_ru"
+                                            Background="Transparent" BorderThickness="0" Cursor="Hand" Padding="6,6" HorizontalAlignment="Stretch">
+                                        <StackPanel HorizontalAlignment="Center">
+                                            <TextBlock Text="🇷🇺 Умный" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
+                                            <TextBlock Text="RU напрямую" FontSize="9" Foreground="{DynamicResource TextFillColorSecondaryBrush}" HorizontalAlignment="Center" Margin="0,1,0,0"/>
+                                        </StackPanel>
+                                    </Button>
+                                </Border>
+
+                                <!-- Global Button -->
+                                <Border Grid.Column="2" CornerRadius="7" BorderThickness="1">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Background" Value="#0AFFFFFF"/>
+                                            <Setter Property="BorderBrush" Value="#15FFFFFF"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsGlobalRouting}" Value="True">
+                                                    <Setter Property="Background" Value="#2210B981"/>
+                                                    <Setter Property="BorderBrush" Value="#6610B981"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <Button Command="{Binding SetRoutingModeCommand}" CommandParameter="global"
+                                            Background="Transparent" BorderThickness="0" Cursor="Hand" Padding="6,6" HorizontalAlignment="Stretch">
+                                        <StackPanel HorizontalAlignment="Center">
+                                            <TextBlock Text="🌍 Весь трафик" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
+                                            <TextBlock Text="Все сайты в VPN" FontSize="9" Foreground="{DynamicResource TextFillColorSecondaryBrush}" HorizontalAlignment="Center" Margin="0,1,0,0"/>
+                                        </StackPanel>
+                                    </Button>
+                                </Border>
+                            </Grid>
+
+                            <Separator Margin="0,0,0,8" Background="#14FFFFFF"/>
+
+                            <!-- AI Bypass Toggle -->
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center" Margin="0,0,8,0">
+                                    <TextBlock Text="Обход ИИ (xbox-dns.ru)" FontSize="12" FontWeight="SemiBold"/>
+                                    <TextBlock Text="Gemini, ChatGPT, Claude в обход блокировок" FontSize="10" TextWrapping="Wrap" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,1,0,0"/>
+                                </StackPanel>
+                                <ui:ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableAiBypass}" Margin="0"/>
+                            </Grid>
+                        </StackPanel>
+                    </ui:Card>
+
+                    <!-- Quick Security & Failover Card -->
+                    <ui:Card Padding="14,10">
+                        <StackPanel>
+                            <TextBlock Text="БЕЗОПАСНОСТЬ И ЗАЩИТА" Style="{StaticResource CardLabel}" Margin="0,0,0,6"/>
+
+                            <!-- Kill Switch -->
+                            <Grid Margin="0,0,0,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="Kill Switch (Защита от утечки IP)" FontSize="11.5" FontWeight="SemiBold"/>
+                                    <TextBlock Text="Блокировка трафика при разрыве" FontSize="9.5" Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+                                </StackPanel>
+                                <ui:ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableKillSwitch}" Margin="0"/>
+                            </Grid>
+
+                            <Separator Margin="0,0,0,6" Background="#12FFFFFF"/>
+
+                            <!-- Auto Fallback -->
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="Авто-переключение узлов" FontSize="11.5" FontWeight="SemiBold"/>
+                                    <TextBlock Text="Выбор сервера с наименьшим пингом" FontSize="9.5" Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+                                </StackPanel>
+                                <ui:ToggleSwitch Grid.Column="1" IsChecked="{Binding AutoFallbackFastestServer}" Margin="0"/>
+                            </Grid>
+                        </StackPanel>
+                    </ui:Card>
+
+                </StackPanel>
+            </Grid>
+
+        </StackPanel>
+    </ScrollViewer>
+</Page>
