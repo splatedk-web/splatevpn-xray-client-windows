@@ -2,7 +2,7 @@
   <img src="https://raw.githubusercontent.com/splatedk-web/splatevpn-xray-client/main/app/src/main/ic_launcher-playstore.png" alt="SplateVPN Logo" width="110" height="110" style="border-radius: 22px;"/>
 </p>
 
-<h1 align="center">🛡️ SplateVPN Tactical Desktop (Windows)</h1>
+<h1 align="center">🛡️ SplateVPN Desktop (Windows)</h1>
 
 <p align="center">
   <b>Нативный высокопроизводительный VPN-клиент нового поколения для Windows 10/11 на базе ядра Xray-core 26.9.9.</b><br>
