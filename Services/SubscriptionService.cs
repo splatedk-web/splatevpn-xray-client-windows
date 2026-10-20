@@ -19,48 +19,103 @@ public class SubscriptionResult
 
 public static class SubscriptionService
 {
-    private static readonly HttpClient _httpClient;
-
-    static SubscriptionService()
+    public static async Task<SubscriptionResult> FetchSubscriptionAsync(string url, Action<string>? log = null, int? proxyPort = null)
     {
-        var handler = new HttpClientHandler
-        {
-            AllowAutoRedirect = true,
-            MaxAutomaticRedirections = 10,
-            ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
-        };
-
-        _httpClient = new HttpClient(handler)
-        {
-            Timeout = TimeSpan.FromSeconds(20)
-        };
-        _httpClient.DefaultRequestHeaders.Add("User-Agent", "v2rayN/6.45 (Windows NT 10.0; Win64; x64) SplateClient/2.7");
-        _httpClient.DefaultRequestHeaders.Add("Accept", "*/*");
-    }
-
-    public static async Task<SubscriptionResult> FetchSubscriptionAsync(string url, Action<string>? log = null)
-    {
-        var subResult = new SubscriptionResult();
         var cleanUrl = url.Trim();
 
-        if (!Uri.TryCreate(cleanUrl, UriKind.Absolute, out var uri) || 
+        if (!Uri.TryCreate(cleanUrl, UriKind.Absolute, out var uri) ||
             (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
         {
             throw new ArgumentException("Некорректный адрес ссылки подписки (ожидается http:// или https://).");
         }
 
-        log?.Invoke($"[SUBSCRIPTION] Отправка запроса к источнику: {cleanUrl}...");
+        log?.Invoke($"[SUBSCRIPTION] Запрос подписки: {uri.Host}...");
+
+        using var handler = new SocketsHttpHandler
+        {
+            AllowAutoRedirect = true,
+            MaxAutomaticRedirections = 10,
+            AutomaticDecompression = System.Net.DecompressionMethods.All,
+            ConnectTimeout = TimeSpan.FromSeconds(8)
+        };
+        if (proxyPort.HasValue)
+        {
+            handler.Proxy = new System.Net.WebProxy($"http://127.0.0.1:{proxyPort.Value}");
+            handler.UseProxy = true;
+            log?.Invoke("[SUBSCRIPTION] Обновление через активный VPN-прокси.");
+        }
+        using var httpClient = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(25) };
+        SubscriptionResult? subResult = null;
+        Exception? firstAttemptException = null;
+
+        // Попытка 1: со стандартным User-Agent (v2rayN / SplateClient)
+        try
+        {
+            subResult = await FetchInternalAsync(httpClient, cleanUrl, userAgent: "v2rayN/6.45 (Windows NT 10.0; Win64; x64) SplateClient/2.9.1", log);
+        }
+        catch (Exception ex) when (ex is TaskCanceledException || ex is HttpRequestException { StatusCode: null })
+        {
+            throw new HttpRequestException($"Не удалось подключиться к серверу подписки {uri.Authority}. Проверьте доступность сервера или обновите подписку через работающий VPN.", ex);
+        }
+        catch (Exception ex)
+        {
+            firstAttemptException = ex;
+            log?.Invoke($"[SUBSCRIPTION] Первичный запрос завершился ошибкой: {ex.Message}. Пробуем альтернативный User-Agent...");
+        }
+
+        // Попытка 2: если попытка 1 вернула 0 узлов или завершилась сетевой ошибкой HTTP, пробуем User-Agent ClashMeta
+        if (subResult == null || subResult.Nodes.Count == 0)
+        {
+            try
+            {
+                log?.Invoke("[SUBSCRIPTION] Повторная попытка с User-Agent: ClashMeta/1.18.0...");
+                var clashResult = await FetchInternalAsync(httpClient, cleanUrl, userAgent: "ClashMeta/1.18.0", log);
+                if (clashResult.Nodes.Count > 0)
+                {
+                    return clashResult;
+                }
+                if (subResult == null)
+                {
+                    subResult = clashResult;
+                }
+            }
+            catch (Exception ex)
+            {
+                log?.Invoke($"[SUBSCRIPTION] Повторный запрос (ClashMeta) завершился ошибкой: {ex.Message}");
+                if (subResult == null && firstAttemptException != null)
+                {
+                    throw firstAttemptException;
+                }
+            }
+        }
+
+        if (subResult == null)
+        {
+            if (firstAttemptException != null)
+                throw firstAttemptException;
+            throw new InvalidOperationException("Не удалось загрузить данные подписки.");
+        }
+
+        return subResult;
+    }
+
+    private static async Task<SubscriptionResult> FetchInternalAsync(HttpClient httpClient, string cleanUrl, string userAgent, Action<string>? log)
+    {
+        var subResult = new SubscriptionResult();
 
         using var request = new HttpRequestMessage(HttpMethod.Get, cleanUrl);
-        using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseContentRead);
+        request.Headers.Clear();
+        request.Headers.Add("User-Agent", userAgent);
+        request.Headers.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,application/x-yaml,text/yaml,text/plain,*/*;q=0.8");
+
+        using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseContentRead);
 
         if (!response.IsSuccessStatusCode)
         {
-            throw new HttpRequestException($"Сервер подписки ответил ошибкой: {(int)response.StatusCode} {response.ReasonPhrase}");
+            throw new HttpRequestException($"Сервер подписки ответил ошибкой: {(int)response.StatusCode} {response.ReasonPhrase}", null, response.StatusCode);
         }
 
         // Проверяем метаданные подписки (Userinfo), если сервер их предоставляет
-        // Пример: upload=0; download=12345678; total=53687091200; expire=1712345678
         if (response.Headers.TryGetValues("subscription-userinfo", out var userInfoValues))
         {
             foreach (var ui in userInfoValues)

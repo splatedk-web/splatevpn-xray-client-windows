@@ -7,6 +7,15 @@ namespace SplateClientDesktop.Services;
 
 public class XrayConfigGenerator
 {
+    private static readonly string[] XboxAiDomains =
+    {
+        "domain:openai.com", "domain:chatgpt.com", "domain:oaistatic.com", "domain:oaiusercontent.com",
+        "domain:sora.com", "domain:ai.com", "geosite:openai",
+        "domain:gemini.google.com", "domain:aistudio.google.com", "domain:ai.google.dev",
+        "domain:generativelanguage.googleapis.com", "domain:gemini.googleapis.com",
+        "domain:proactivebackend-pa.googleapis.com", "domain:alkalimakersuite-pa.googleapis.com",
+        "domain:makersuite.google.com", "domain:bard.google.com"
+    };
     public string GenerateConfig(
         ServerNode? node,
         string mode = "smart_ru",
@@ -27,10 +36,47 @@ public class XrayConfigGenerator
         string? customDirectRules = null,
         bool enableTun = false,
         string? perAppProxyList = null,
-        string? perAppDirectList = null)
+        string? perAppDirectList = null,
+        string? uplinkInterface = null,
+        int metricsPort = 0,
+        bool enableAiXboxDns = false,
+        bool enableAiDns = false,
+        string aiRoutingMode = "dns_ai",
+        string customDohUrl = "",
+        string? customBlockRules = null,
+        bool enableAdBlock = false,
+        bool enableMux = false,
+        int muxConcurrency = 8,
+        string tlsFragmentLength = "100-200",
+        string tlsFragmentInterval = "10-20",
+        string tlsFragmentPackets = "tlshello",
+        bool shareLan = false,
+        string aiDnsProvider = "dns_ai",
+        bool aiTlsFragment = false,
+        string? adBlockMatcher = null,
+        string adBlockAllowlist = "")
     {
-        var root = new JsonObject();
+        if (socksPort == httpPort || socksPort is < 1 or > 65535 || httpPort is < 1 or > 65535)
+            throw new ArgumentException("HTTP и SOCKS: укажите разные порты от 1 до 65535.");
+        // Old desktop profiles may contain Android-only options. Keep the stored lists,
+        // but never emit unsupported process rules or an unusable FakeDNS configuration.
+        var modernAiDns = enableAiDns && enableAiBypass && aiRoutingMode == "dns_ai";
+        var selectedSmartDns = SmartDnsProviders.ForAi(aiDnsProvider);
+        var generalSmartDns = SmartDnsProviders.Find(dnsProvider);
+        var aiDnsUrl = modernAiDns ? selectedSmartDns.DohUrl : "https://xbox-dns.ru/dns-query";
+        var aiDomains = modernAiDns ? SmartDnsProviders.AiDomains : XboxAiDomains;
+        enableAiXboxDns = enableAiXboxDns || modernAiDns;
+        if (enableAiXboxDns) enableSniffing = true;
+        if (enableAdBlock) enableSniffing = true;
+        if (muxConcurrency is < 1 or > 128) throw new ArgumentException("Mux: параллельность от 1 до 128.");
+        if (!ValidRange(tlsFragmentLength, 1, 65535) || !ValidRange(tlsFragmentInterval, 0, 10000) ||
+            !(tlsFragmentPackets == "tlshello" || ValidRange(tlsFragmentPackets, 1, 100)))
+            throw new ArgumentException("Некорректные параметры фрагментации TLS.");
+        isFakeDns = isFakeDns && enableTun && enableSniffing; var root = new JsonObject();
 
+        root["stats"] = new JsonObject();
+        if (metricsPort > 0)
+            root["metrics"] = new JsonObject { ["tag"] = "metrics", ["listen"] = $"127.0.0.1:{metricsPort}" };
         // 1. Log
         root["log"] = new JsonObject
         {
@@ -40,15 +86,18 @@ public class XrayConfigGenerator
         // 2. DNS
         var (dohUrl, fallbackIp) = dnsProvider.ToLowerInvariant() switch
         {
-            "google" => ("https://8.8.8.8/dns-query", "8.8.8.8"),
-            "quad9" => ("https://9.9.9.9/dns-query", "9.9.9.9"),
-            "adguard" => ("https://94.140.14.14/dns-query", "94.140.14.14"),
+            "google" => ("8.8.8.8", "8.8.8.8"),
+            "quad9" => ("9.9.9.9", "9.9.9.9"),
+            "adguard" => ("94.140.14.14", "94.140.14.14"),
             "yandex" => ("tcp://77.88.8.8:53", "77.88.8.8"),
             "xbox" => ("https://xbox-dns.ru/dns-query", "111.88.96.57"),
-            _ => ("https://1.1.1.1/dns-query", "1.1.1.1")
+            "dns_ai" => ("https://dns.dns-ai.ru/dns-query", "1.1.1.1"),
+            "custom" => (ValidateDoh(customDohUrl), "1.1.1.1"),
+            _ => ("1.1.1.1", "1.1.1.1")
         };
 
         var servers = new JsonArray();
+        if (generalSmartDns != null) dohUrl = generalSmartDns.DohUrl;
         if (isFakeDns) servers.Add("fakedns");
 
         // Split-DNS: Local Yandex DNS for RU domains (TCP 53 prevents UDP transaction ID loss)
@@ -81,57 +130,30 @@ public class XrayConfigGenerator
         {
             ["address"] = "tcp://77.88.8.8:53",
             ["port"] = 53,
+            ["skipFallback"] = true,
             ["domains"] = ruDomains
         };
-        servers.Add(ruDns);
+        if (mode == "smart_ru") servers.Add(ruDns);
 
-        if (enableAiBypass)
-        {
-            var aiDns = new JsonObject
+        if (enableAiXboxDns)
+            servers.Add(new JsonObject
             {
-                ["address"] = "https://xbox-dns.ru/dns-query",
-                ["port"] = 443,
-                ["domains"] = new JsonArray
-                {
-                    "domain:openai.com",
-                    "domain:chatgpt.com",
-                    "domain:oaistatic.com",
-                    "domain:oaiusercontent.com",
-                    "domain:sora.com",
-                    "domain:ai.com",
-                    "domain:gemini.google.com",
-                    "domain:generativelanguage.googleapis.com",
-                    "domain:proactivebackend-pa.googleapis.com",
-                    "domain:alkalimakersuite-pa.googleapis.com",
-                    "domain:aistudio.google.com",
-                    "domain:makersuite.google.com",
-                    "domain:bard.google.com",
-                    "domain:deepmind.google",
-                    "domain:claude.ai",
-                    "domain:claude.com",
-                    "domain:anthropic.com",
-                    "domain:anthropic.ai",
-                    "domain:poe.com",
-                    "domain:copilot.microsoft.com",
-                    "domain:bing.com",
-                    "domain:perplexity.ai",
-                    "domain:x.ai",
-                    "domain:grok.com",
-                    "geosite:openai"
-                }
-            };
-            servers.Add(aiDns);
-        }
+                ["address"] = aiDnsUrl,
+                ["tag"] = "dns-xbox",
+                ["queryStrategy"] = "UseIPv4",
+                ["domains"] = new JsonArray(aiDomains.Select(d => JsonValue.Create(d)).ToArray()),
+                ["skipFallback"] = true
+            });
 
         // Main DoH via proxy (bypasses ISP/TSPU DPI blocking)
-        servers.Add(new JsonObject { ["address"] = dohUrl });
-        servers.Add(fallbackIp);
-        servers.Add("tcp://8.8.8.8:53");
-        servers.Add("tcp://1.1.1.1:53");
+        servers.Add(new JsonObject { ["address"] = dohUrl, ["tag"] = generalSmartDns != null ? "dns-ai-provider" : "dns-query" });
+
+
+
 
         var protocol = node?.Protocol?.ToLowerInvariant() ?? "vless";
         var rawSec = node?.Security?.ToLowerInvariant()?.Trim() ?? "none";
-        string? vlessProxyDomain = null;
+        var vlessProxyDomain = ServerAddressAlias(node);
         var hosts = new JsonObject
         {
             ["cloudflare-dns.com"] = "1.1.1.1",
@@ -140,17 +162,17 @@ public class XrayConfigGenerator
             ["dns.adguard.com"] = "94.140.14.14",
             ["xbox-dns.ru"] = "111.88.96.57"
         };
-        if (protocol == "vless" && rawSec == "none" && !string.IsNullOrWhiteSpace(node?.Address))
-        {
-            vlessProxyDomain = "server.local";
-            hosts[vlessProxyDomain] = node.Address.Trim();
-        }
-
+        if (modernAiDns || dnsProvider == "dns_ai") hosts["dns.dns-ai.ru"] = new JsonArray { "194.87.196.13", "186.246.49.127" };
+        foreach (var provider in new[] { modernAiDns ? selectedSmartDns : null, generalSmartDns }.OfType<SmartDnsProvider>())
+            hosts[provider.Host] = new JsonArray(provider.BootstrapIpv4.Select(ip => JsonValue.Create(ip)).ToArray());
+        if (enableAdBlock) AdFilterService.AddDnsHosts(hosts, adBlockMatcher, adBlockAllowlist);
+        if (vlessProxyDomain != null) hosts[vlessProxyDomain] = node!.Address;
         root["dns"] = new JsonObject
         {
             ["servers"] = servers,
             ["hosts"] = hosts,
-            ["queryStrategy"] = "UseIPv4",
+            ["queryStrategy"] = blockIpv6 ? "UseIPv4" : "UseIP",
+            ["tag"] = "dns-query",
             ["enableParallelQuery"] = true,
             ["serveStale"] = true,
             ["serveExpiredTTL"] = 86400,
@@ -187,7 +209,7 @@ public class XrayConfigGenerator
             ["tag"] = "socks-in",
             ["protocol"] = "socks",
             ["port"] = socksPort,
-            ["listen"] = "127.0.0.1",
+            ["listen"] = shareLan ? "0.0.0.0" : "127.0.0.1",
             ["settings"] = new JsonObject
             {
                 ["auth"] = "noauth",
@@ -207,7 +229,7 @@ public class XrayConfigGenerator
                 ["enabled"] = true,
                 ["destOverride"] = socksDest,
                 ["metadataOnly"] = false,
-                ["routeOnly"] = routeOnlySniffing
+                ["routeOnly"] = (isFakeDns || enableAiXboxDns) ? false : routeOnlySniffing
             };
         }
         inbounds.Add(socksIn);
@@ -218,7 +240,7 @@ public class XrayConfigGenerator
             ["tag"] = "http-in",
             ["protocol"] = "http",
             ["port"] = httpPort,
-            ["listen"] = "127.0.0.1",
+            ["listen"] = shareLan ? "0.0.0.0" : "127.0.0.1",
             ["settings"] = new JsonObject
             {
                 ["allowTransparent"] = false
@@ -236,51 +258,21 @@ public class XrayConfigGenerator
             {
                 ["enabled"] = true,
                 ["destOverride"] = httpDest,
-                ["metadataOnly"] = true,
-                ["routeOnly"] = routeOnlySniffing
+                ["metadataOnly"] = false,
+                ["routeOnly"] = (isFakeDns || enableAiXboxDns) ? false : routeOnlySniffing
             };
         }
         inbounds.Add(httpIn);
-
-        if (enableTun)
-        {
-            // 3.3 Dokodemo-door / Tun Inbound for system-wide packet interception
-            var tunIn = new JsonObject
-            {
-                ["tag"] = "tun-in",
-                ["protocol"] = "dokodemo-door",
-                ["port"] = socksPort + 1,
-                ["listen"] = "127.0.0.1",
-                ["settings"] = new JsonObject
-                {
-                    ["network"] = "tcp,udp",
-                    ["followRedirect"] = true
-                },
-                ["streamSettings"] = new JsonObject
-                {
-                    ["sockopt"] = inboundSockopt.DeepClone()
-                }
-            };
-            if (enableSniffing)
-            {
-                var tunDest = new JsonArray { "http", "tls", "quic" };
-                if (isFakeDns) tunDest.Add("fakedns");
-                tunIn["sniffing"] = new JsonObject
-                {
-                    ["enabled"] = true,
-                    ["destOverride"] = tunDest,
-                    ["metadataOnly"] = false,
-                    ["routeOnly"] = routeOnlySniffing
-                };
-            }
-            inbounds.Add(tunIn);
-        }
 
         root["inbounds"] = inbounds;
 
         // 4. Outbounds
         var outbounds = new JsonArray();
-        outbounds.Add(BuildProxyOutbound(node, xhttpModeOverride, tcpCongestion, enableTlsFragment, vlessProxyDomain));
+        var proxyOutbound = BuildProxyOutbound(node, xhttpModeOverride, tcpCongestion, enableTlsFragment, vlessProxyDomain);
+        var effectiveNetwork = proxyOutbound["streamSettings"]?["network"]?.GetValue<string>();
+        if (enableMux && protocol is "vless" or "vmess" && effectiveNetwork is not ("xhttp" or "splithttp" or "grpc") && node?.Flow != "xtls-rprx-vision")
+            proxyOutbound["mux"] = new JsonObject { ["enabled"] = true, ["concurrency"] = muxConcurrency, ["xudpConcurrency"] = 8 };
+        outbounds.Add(proxyOutbound);
 
         if (enableTlsFragment)
         {
@@ -293,12 +285,24 @@ public class XrayConfigGenerator
                     ["domainStrategy"] = "AsIs",
                     ["fragment"] = new JsonObject
                     {
-                        ["packets"] = "tlshello",
-                        ["length"] = "100-200",
-                        ["interval"] = "10-20"
+                        ["packets"] = tlsFragmentPackets,
+                        ["length"] = tlsFragmentLength,
+                        ["interval"] = tlsFragmentInterval
                     }
                 }
             });
+        }
+
+        var directSockopt = new JsonObject
+        {
+            ["domainStrategy"] = "UseIP",
+            ["tcpNoDelay"] = true,
+            ["tcpKeepAliveInterval"] = 15,
+            ["tcpKeepAliveIdle"] = 15
+        };
+        if (!string.IsNullOrEmpty(tcpCongestion) && !tcpCongestion.Equals("bbr", StringComparison.OrdinalIgnoreCase))
+        {
+            directSockopt["tcpCongestion"] = tcpCongestion;
         }
 
         outbounds.Add(new JsonObject
@@ -307,16 +311,22 @@ public class XrayConfigGenerator
             ["protocol"] = "freedom",
             ["streamSettings"] = new JsonObject
             {
-                ["sockopt"] = new JsonObject
-                {
-                    ["domainStrategy"] = "UseIP",
-                    ["tcpNoDelay"] = true,
-                    ["tcpKeepAliveInterval"] = 15,
-                    ["tcpKeepAliveIdle"] = 15,
-                    ["tcpCongestion"] = tcpCongestion
-                }
+                ["sockopt"] = directSockopt
             }
         });
+
+        if (enableAiXboxDns)
+        {
+            var aiSockopt = directSockopt.DeepClone().AsObject();
+            aiSockopt["domainStrategy"] = "ForceIPv4";
+            outbounds.Add(new JsonObject
+            {
+                ["tag"] = "ai-smartdns",
+                ["protocol"] = "freedom",
+                ["settings"] = modernAiDns && aiTlsFragment ? new JsonObject { ["fragment"] = new JsonObject { ["packets"] = "tlshello", ["length"] = "10-20", ["interval"] = "1-2" } } : new JsonObject(),
+                ["streamSettings"] = new JsonObject { ["sockopt"] = aiSockopt }
+            });
+        }
 
         outbounds.Add(new JsonObject
         {
@@ -337,16 +347,42 @@ public class XrayConfigGenerator
             }
         });
 
+        if (!string.IsNullOrWhiteSpace(uplinkInterface))
+        {
+            foreach (var outbound in outbounds.OfType<JsonObject>())
+            {
+                if (outbound["protocol"]?.GetValue<string>() is not ("freedom" or "vless" or "vmess" or "trojan" or "shadowsocks")) continue;
+                var stream = outbound["streamSettings"] as JsonObject ?? new JsonObject();
+                if (outbound["streamSettings"] == null) outbound["streamSettings"] = stream;
+                var opt = stream["sockopt"] as JsonObject ?? new JsonObject();
+                if (stream["sockopt"] == null) stream["sockopt"] = opt;
+                opt["interface"] = uplinkInterface;
+                if (outbound["tag"]?.GetValue<string>() != "ai-smartdns") opt["domainStrategy"] = "UseIPv4";
+            }
+        }
         root["outbounds"] = outbounds;
 
         // 5. Routing Rules
         var rules = new JsonArray();
+        if (enableAdBlock) rules.Add(AdFilterService.BlockRule(adBlockMatcher, adBlockAllowlist));
+        if (generalSmartDns != null) rules.Add(new JsonObject { ["type"] = "field", ["inboundTag"] = new JsonArray { "dns-ai-provider" }, ["outboundTag"] = "direct" });
+        if (enableAiXboxDns)
+            rules.Add(new JsonObject { ["type"] = "field", ["inboundTag"] = new JsonArray { "dns-xbox" }, ["outboundTag"] = "direct" });
+        if (mode == "smart_ru")
+            rules.Add(new JsonObject
+            {
+                ["type"] = "field",
+                ["inboundTag"] = new JsonArray { "dns-query" },
+                ["ip"] = new JsonArray { "77.88.8.8" },
+                ["outboundTag"] = "direct"
+            });
+        rules.Add(new JsonObject { ["type"] = "field", ["inboundTag"] = new JsonArray { "dns-query" }, ["outboundTag"] = "proxy" });
 
         // 5.1 Route incoming DNS (UDP 53) to Xray DNS
         rules.Add(new JsonObject
         {
             ["type"] = "field",
-            ["inboundTag"] = new JsonArray { "socks-in", "http-in", "tun-in" },
+            ["inboundTag"] = new JsonArray { "socks-in", "http-in" },
             ["port"] = "53",
             ["outboundTag"] = "dns-out"
         });
@@ -384,8 +420,25 @@ public class XrayConfigGenerator
         });
 
         // 5.5 Per-App Routing (Process / Application based)
-        AddPerAppRoutingRules(rules, perAppProxyList, "proxy");
-        AddPerAppRoutingRules(rules, perAppDirectList, "direct");
+
+
+
+        // Match the reference client's priority: diagnostics measure the VPN,
+        // even when smart-RU or a broad user direct rule would bypass it.
+        rules.Add(new JsonObject
+        {
+            ["type"] = "field",
+            ["domain"] = new JsonArray { "domain:cp.cloudflare.com", "domain:speed.cloudflare.com", "domain:cachefly.net", "full:ipwho.is", "full:api.ip.sb", "full:ipinfo.io", "full:connectivitycheck.gstatic.com", "full:www.msftconnecttest.com" },
+            ["outboundTag"] = "proxy"
+        });
+        AddCustomRoutingRules(rules, customBlockRules, "block");
+        if (enableAiXboxDns)
+            rules.Add(new JsonObject
+            {
+                ["type"] = "field",
+                ["outboundTag"] = "ai-smartdns",
+                ["domain"] = new JsonArray(aiDomains.Select(d => JsonValue.Create(d)).ToArray())
+            });
 
         // 5.6 User Custom Rules (Always Proxy / Always Direct)
         AddCustomRoutingRules(rules, customProxyRules, "proxy");
@@ -393,18 +446,39 @@ public class XrayConfigGenerator
 
         if (enableAiBypass)
         {
-            // Route AI domains to direct so they use the IPs resolved by xbox-dns.ru
+            // Keep desktop AI apps on the selected VPN, including long-lived TLS connections.
+            // AI rules precede smart-RU IP routing.
             rules.Add(new JsonObject
             {
                 ["type"] = "field",
-                ["outboundTag"] = "direct",
+                ["outboundTag"] = "proxy",
                 ["domain"] = new JsonArray
                 {
+                    "domain:openai.com",
+                    "domain:chatgpt.com",
+                    "domain:oaistatic.com",
+                    "domain:oaiusercontent.com",
+                    "domain:sora.com",
+                    "domain:ai.com",
+                    "domain:gemini.google.com",
+                    "domain:generativelanguage.googleapis.com",
+                    "domain:proactivebackend-pa.googleapis.com",
+                    "domain:alkalimakersuite-pa.googleapis.com",
+                    "domain:aistudio.google.com",
+                    "domain:makersuite.google.com",
+                    "domain:bard.google.com",
+                    "domain:deepmind.google",
+                    "domain:claude.ai",
+                    "domain:claude.com",
+                    "domain:anthropic.com",
+                    "domain:anthropic.ai",
+                    "domain:poe.com",
+                    "domain:copilot.microsoft.com",
+                    "domain:perplexity.ai",
+                    "domain:x.ai",
+                    "domain:grok.com",
                     "geosite:openai",
-                    "geosite:anthropic",
-                    "geosite:google",
-                    "domain:midjourney.com",
-                    "domain:poe.com"
+                    "geosite:anthropic"
                 }
             });
         }
@@ -509,7 +583,7 @@ public class XrayConfigGenerator
             ["rules"] = rules
         };
 
-        // 6. Policy: High-performance buffer and connection timeouts
+        // 6. Policy: High-performance buffer and connection timeouts (matching Android)
         root["policy"] = new JsonObject
         {
             ["levels"] = new JsonObject
@@ -517,16 +591,18 @@ public class XrayConfigGenerator
                 ["0"] = new JsonObject
                 {
                     ["bufferSize"] = bufferSizeKb > 0 ? bufferSizeKb : 4096,
-                    ["handshake"] = 4,
+                    ["handshake"] = 8,
                     ["connIdle"] = 300,
-                    ["uplinkOnly"] = 0,
-                    ["downlinkOnly"] = 0
+                    ["uplinkOnly"] = 5,
+                    ["downlinkOnly"] = 30
                 }
             },
             ["system"] = new JsonObject
             {
-                ["statsOutboundUplink"] = false,
-                ["statsOutboundDownlink"] = false
+                ["statsInboundUplink"] = true,
+                ["statsInboundDownlink"] = true,
+                ["statsOutboundUplink"] = true,
+                ["statsOutboundDownlink"] = true
             }
         };
 
@@ -538,16 +614,49 @@ public class XrayConfigGenerator
         return root.ToJsonString(options);
     }
 
-    private JsonObject BuildProxyOutbound(
+    public static string? ServerAddressAlias(ServerNode? node)
+    {
+        if (node == null || !node.Protocol.Equals("vless", StringComparison.OrdinalIgnoreCase) ||
+            (!string.IsNullOrEmpty(node.Security) && !node.Security.Equals("none", StringComparison.OrdinalIgnoreCase)) ||
+            string.IsNullOrWhiteSpace(node.Address)) return null;
+        if (System.Net.IPAddress.TryParse(node.Address, out var ip))
+        {
+            var bytes = ip.GetAddressBytes();
+            if (System.Net.IPAddress.IsLoopback(ip) || (bytes.Length == 4 && (bytes[0] == 10 || (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) || (bytes[0] == 192 && bytes[1] == 168))) ||
+                (bytes.Length == 16 && ((bytes[0] & 0xfe) == 0xfc || ip.IsIPv6LinkLocal))) return null;
+        }
+        else if (node.Address.EndsWith(".local", StringComparison.OrdinalIgnoreCase) || node.Address.EndsWith(".internal", StringComparison.OrdinalIgnoreCase) || node.Address.Equals("localhost", StringComparison.OrdinalIgnoreCase)) return null;
+        var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(node.Address.ToLowerInvariant()));
+        return "server-" + Convert.ToHexString(hash.AsSpan(0, 8)).ToLowerInvariant() + ".internal";
+    }
+
+    public static string ValidateDoh(string url)
+    {
+        if (!Uri.TryCreate(url.Trim(), UriKind.Absolute, out var uri) || uri.Scheme != "https" || string.IsNullOrEmpty(uri.Host))
+            throw new ArgumentException("Собственный DoH должен быть HTTPS URL.");
+        if (uri.AbsolutePath == "/" && uri.Query.Length == 0 && SmartDnsProviders.All.FirstOrDefault(p => p.Host.Equals(uri.Host, StringComparison.OrdinalIgnoreCase)) is { } provider) return provider.DohUrl;
+        return uri.AbsoluteUri;
+    }
+
+    public static bool ValidRange(string value, int minimum, int maximum)
+    {
+        var parts = value.Split('-');
+        return parts.Length is 1 or 2 && parts.All(p => int.TryParse(p, out var n) && n >= minimum && n <= maximum) &&
+            (parts.Length == 1 || int.Parse(parts[0]) <= int.Parse(parts[1]));
+    }
+
+    public static JsonObject BuildProxyOutbound(
         ServerNode? node,
         string xhttpModeOverride = "auto",
         string tcpCongestion = "bbr",
         bool enableTlsFragment = false,
-        string? vlessProxyDomain = null)
+        string? vlessProxyDomain = null,
+        string tag = "proxy")
     {
+        vlessProxyDomain ??= ServerAddressAlias(node);
         var proxy = new JsonObject
         {
-            ["tag"] = "proxy"
+            ["tag"] = tag
         };
 
         var protocol = node?.Protocol?.ToLowerInvariant() ?? "vless";
@@ -555,7 +664,7 @@ public class XrayConfigGenerator
 
         var network = string.IsNullOrEmpty(node?.Network) ? "tcp" : node.Network.ToLowerInvariant();
         if (network == "splithttp") network = "xhttp";
-        var security = string.IsNullOrEmpty(node?.Security) ? "reality" : node.Security.ToLowerInvariant();
+        var security = string.IsNullOrEmpty(node?.Security) ? (protocol == "trojan" ? "tls" : "none") : node.Security.ToLowerInvariant();
 
         var settings = new JsonObject();
         if (protocol == "vless")
@@ -569,11 +678,6 @@ public class XrayConfigGenerator
             {
                 user["flow"] = node.Flow;
             }
-            else if ((security == "reality" || security == "tls") && network == "tcp")
-            {
-                user["flow"] = "xtls-rprx-vision";
-            }
-
             var serverItem = new JsonObject
             {
                 ["address"] = vlessProxyDomain ?? (string.IsNullOrEmpty(node?.Address) ? "127.0.0.1" : node.Address),
@@ -629,13 +733,37 @@ public class XrayConfigGenerator
             ["security"] = security
         };
 
+        // Resolve ALPN protocol negotiation array (Critical for HTTP/2 multiplexing on XHTTP/H2)
+        var alpnArray = new JsonArray();
+        if (!string.IsNullOrEmpty(node?.Alpn))
+        {
+            foreach (var a in node.Alpn.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                var trimmed = a.Trim();
+                if (network == "ws" && trimmed.Equals("h2", StringComparison.OrdinalIgnoreCase)) continue;
+                alpnArray.Add(trimmed);
+            }
+        }
+        if (alpnArray.Count == 0)
+        {
+            if (network == "xhttp" || network == "h2")
+            {
+                alpnArray.Add("h2");
+                alpnArray.Add("http/1.1");
+            }
+            else if (network == "ws")
+            {
+                alpnArray.Add("http/1.1");
+            }
+        }
+
         if (security == "reality")
         {
             var reality = new JsonObject
             {
                 ["show"] = false,
                 ["fingerprint"] = string.IsNullOrEmpty(node?.Fingerprint) ? "chrome" : node.Fingerprint,
-                ["serverName"] = string.IsNullOrEmpty(node?.Sni) ? "www.amazon.com" : node.Sni,
+                ["serverName"] = string.IsNullOrEmpty(node?.Sni) ? (node?.Address ?? "") : node.Sni,
                 ["publicKey"] = node?.PublicKey ?? "",
                 ["shortId"] = node?.ShortId ?? "",
                 ["spiderX"] = node?.SpiderX ?? ""
@@ -643,6 +771,10 @@ public class XrayConfigGenerator
             if (!string.IsNullOrEmpty(node?.Mldsa65Verify))
             {
                 reality["mldsa65Verify"] = node.Mldsa65Verify;
+            }
+            if (alpnArray.Count > 0)
+            {
+                reality["alpn"] = alpnArray.DeepClone();
             }
             streamSettings["realitySettings"] = reality;
         }
@@ -659,38 +791,14 @@ public class XrayConfigGenerator
             {
                 tls["verifyPeerCertByName"] = node.VerifyPeerCertByName;
             }
-            else if (!string.IsNullOrEmpty(node?.Address) && !string.IsNullOrEmpty(node?.Sni) && !string.Equals(node.Sni, node.Address, StringComparison.OrdinalIgnoreCase))
-            {
-                tls["verifyPeerCertByName"] = node.Address;
-            }
-
             if (!string.IsNullOrEmpty(node?.PinnedPeerCertSha256))
             {
                 tls["pinnedPeerCertSha256"] = node.PinnedPeerCertSha256;
             }
 
-            if (!string.IsNullOrEmpty(node?.Alpn))
+            if (alpnArray.Count > 0)
             {
-                var alpnArray = new JsonArray();
-                foreach (var a in node.Alpn.Split(new[] { ',', ';' }, System.StringSplitOptions.RemoveEmptyEntries))
-                {
-                    var trimmed = a.Trim();
-                    // WebSocket over TLS requires HTTP/1.1; negotiating H2 causes connection to hang
-                    if (network == "ws" && trimmed.Equals("h2", StringComparison.OrdinalIgnoreCase)) continue;
-                    alpnArray.Add(trimmed);
-                }
-                if (network == "ws" && alpnArray.Count == 0)
-                {
-                    alpnArray.Add("http/1.1");
-                }
-                if (alpnArray.Count > 0)
-                {
-                    tls["alpn"] = alpnArray;
-                }
-            }
-            else if (network == "ws")
-            {
-                tls["alpn"] = new JsonArray { "http/1.1" };
+                tls["alpn"] = alpnArray.DeepClone();
             }
             streamSettings["tlsSettings"] = tls;
         }
@@ -700,10 +808,15 @@ public class XrayConfigGenerator
         {
             ["tcpNoDelay"] = true,
             ["tcpKeepAliveInterval"] = 15,
-            ["tcpKeepAliveIdle"] = 15,
-            ["tcpCongestion"] = tcpCongestion
+            ["tcpKeepAliveIdle"] = 15
         };
-        if (enableTlsFragment && (security == "tls" || security == "reality"))
+        if (vlessProxyDomain != null) sockopt["domainStrategy"] = "UseIP";
+        // On Windows, 'bbr' is not a valid Winsock TCP_CONGESTION algorithm and returns WSAEINVAL
+        if (!string.IsNullOrEmpty(tcpCongestion) && !tcpCongestion.Equals("bbr", StringComparison.OrdinalIgnoreCase))
+        {
+            sockopt["tcpCongestion"] = tcpCongestion;
+        }
+        if (enableTlsFragment && security == "tls")
         {
             sockopt["dialerProxy"] = "fragment";
         }
@@ -724,7 +837,7 @@ public class XrayConfigGenerator
                 // In Xray 26.9.9 xPaddingBytes is directly on xhttpSettings
                 xhttp["xPaddingBytes"] = node.Padding;
             }
-            // Multiplexing for high throughput on XHTTP
+            // Multiplexing for high throughput on XHTTP (only if server specifies xmux)
             if (node?.XmuxMaxConnections > 0)
             {
                 var xmux = new JsonObject
@@ -734,15 +847,6 @@ public class XrayConfigGenerator
                 if (!string.IsNullOrEmpty(node.XmuxMaxRequestTimes)) xmux["hMaxRequestTimes"] = node.XmuxMaxRequestTimes;
                 if (!string.IsNullOrEmpty(node.XmuxMaxReusableSecs)) xmux["hMaxReusableSecs"] = node.XmuxMaxReusableSecs;
                 xhttp["xmux"] = xmux;
-            }
-            else
-            {
-                xhttp["xmux"] = new JsonObject
-                {
-                    ["maxConcurrency"] = 16,
-                    ["cMaxReuseTimes"] = 64,
-                    ["hKeepAlivePeriod"] = 60
-                };
             }
             streamSettings["xhttpSettings"] = xhttp;
         }
@@ -776,8 +880,8 @@ public class XrayConfigGenerator
 
     private static string ResolveXhttpMode(string xhttpModeOverride, ServerNode? node)
     {
-        if (!string.IsNullOrEmpty(xhttpModeOverride) && 
-            !xhttpModeOverride.Equals("auto", StringComparison.OrdinalIgnoreCase) && 
+        if (!string.IsNullOrEmpty(xhttpModeOverride) &&
+            !xhttpModeOverride.Equals("auto", StringComparison.OrdinalIgnoreCase) &&
             IsValidXhttpMode(xhttpModeOverride))
         {
             return xhttpModeOverride.ToLowerInvariant();
@@ -852,29 +956,4 @@ public class XrayConfigGenerator
         }
     }
 
-    private static void AddPerAppRoutingRules(JsonArray rules, string? appListText, string outboundTag)
-    {
-        if (string.IsNullOrWhiteSpace(appListText)) return;
-
-        var apps = new JsonArray();
-        var lines = appListText.Split(new[] { '\r', '\n', ',', ';' }, StringSplitOptions.RemoveEmptyEntries);
-        foreach (var rawLine in lines)
-        {
-            var app = rawLine.Trim();
-            if (string.IsNullOrEmpty(app) || app.StartsWith('#') || app.StartsWith("//"))
-                continue;
-
-            apps.Add(app);
-        }
-
-        if (apps.Count > 0)
-        {
-            rules.Add(new JsonObject
-            {
-                ["type"] = "field",
-                ["outboundTag"] = outboundTag,
-                ["app"] = apps
-            });
-        }
-    }
 }

@@ -1,190 +1,212 @@
-using System;
 using System.Diagnostics;
 using System.IO;
+using System.Net.NetworkInformation;
 using System.Net;
 using System.Net.Sockets;
-using System.Threading.Tasks;
+using System.Security.Principal;
+using System.Text;
+using System.Text.Json;
 
 namespace SplateClientDesktop.Services;
 
+public record NetworkUplink(string Name, int Index, string Gateway);
+
+/// <summary>Owns only the adapter, process and routes created by this client.</summary>
 public class TunDeviceManager
 {
     private Process? _tunProcess;
-    private string? _bypassedServerIp;
-    private string? _originalGateway;
-    private const string TunDeviceName = "SplateTUN";
-    private const string TunIp = "172.19.0.1";
-    private const string TunGateway = "172.19.0.2";
-    private const string TunMask = "255.255.255.252";
+    private ChildProcessJob? _job;
+    private readonly List<(string Family, string Prefix)> _routes = new();
+    private readonly SemaphoreSlim _lifecycle = new(1, 1);
+    private bool _stopping;
+    public const string DeviceName = "SplateTUN";
+    public bool IsRunning => _tunProcess is { HasExited: false };
+    public event Action<int>? OnProcessExited;
 
-    public bool IsRunning => _tunProcess != null && !_tunProcess.HasExited;
-
-    public async Task<bool> StartTunAsync(int socksPort, string serverHost, Action<string>? log = null)
+    public static bool IsAdministrator()
     {
+        using var identity = WindowsIdentity.GetCurrent();
+        return new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
+    }
+
+    public static async Task<NetworkUplink> GetUplinkAsync(CancellationToken ct = default)
+    {
+        // Only ASCII numbers cross the Windows PowerShell pipe. Resolve the Unicode
+        // adapter name in-process: OEM/UTF-8 conversion used to break Russian names.
+        const string script = "Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -PolicyStore ActiveStore | Where-Object { $_.InterfaceAlias -ne 'SplateTUN' -and $_.NextHop -ne '0.0.0.0' } | Sort-Object @{Expression={$_.RouteMetric + (Get-NetIPInterface -AddressFamily IPv4 -InterfaceIndex $_.InterfaceIndex).InterfaceMetric}} | Select-Object -First 1 @{n='Index';e={$_.InterfaceIndex}},@{n='Gateway';e={$_.NextHop}} | ConvertTo-Json -Compress";
+        var json = await RunAsync("powershell.exe", new[] { "-NoProfile", "-NonInteractive", "-EncodedCommand", Convert.ToBase64String(Encoding.Unicode.GetBytes(script)) }, ct);
+        using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(json) ? "null" : json.Trim());
+        var route = document.RootElement;
+        if (route.ValueKind != JsonValueKind.Object) throw new IOException("Не найден активный сетевой шлюз. Проверьте подключение к интернету.");
+        return ResolveUplink(route.GetProperty("Index").GetInt32(), route.GetProperty("Gateway").GetString()!);
+    }
+
+    internal static NetworkUplink ResolveUplink(int index, string gateway)
+    {
+        var nic = NetworkInterface.GetAllNetworkInterfaces().FirstOrDefault(n =>
+            n.OperationalStatus == OperationalStatus.Up && n.Supports(NetworkInterfaceComponent.IPv4) &&
+            n.GetIPProperties().GetIPv4Properties().Index == index);
+        if (nic == null || nic.Name == DeviceName || !IPAddress.TryParse(gateway, out var address) ||
+            address.AddressFamily != AddressFamily.InterNetwork || address.Equals(IPAddress.Any))
+            throw new IOException("Физический сетевой адаптер недоступен. Проверьте Wi-Fi или Ethernet и повторите подключение.");
+        // Validate Windows interface binding before installing any capture routes.
+        using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        socket.SetSocketOption(SocketOptionLevel.IP, (SocketOptionName)31, IPAddress.HostToNetworkOrder(index)); // IP_UNICAST_IF
+        return new(nic.Name, index, gateway);
+    }
+
+    public async Task<bool> StartTunAsync(int socksPort, NetworkUplink uplink, bool blockIpv6,
+        Action<string>? log = null, CancellationToken ct = default)
+    {
+        await _lifecycle.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            StopTun(log);
-
-            var baseDir = AppDomain.CurrentDomain.BaseDirectory;
-            var tunExe = Path.Combine(baseDir, "core", "tun2socks.exe");
-            var wintunDll = Path.Combine(baseDir, "core", "wintun.dll");
-
-            if (!File.Exists(tunExe) || !File.Exists(wintunDll))
+            await StopCoreAsync(log).ConfigureAwait(false);
+            _stopping = false;
+            if (!IsAdministrator())
+                throw new InvalidOperationException("Для TUN запустите SplateVPN от имени администратора. Режим прокси доступен без повышения прав.");
+            var coreDir = Path.Combine(AppContext.BaseDirectory, "core");
+            var exe = Path.Combine(coreDir, "tun2socks.exe");
+            if (!File.Exists(exe) || !File.Exists(Path.Combine(coreDir, "wintun.dll")))
+                throw new FileNotFoundException("В папке core отсутствуют tun2socks.exe или wintun.dll.");
+            var psi = BuildStartInfo(coreDir, DeviceName, socksPort);
+            var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
+            _tunProcess = proc;
+            proc.OutputDataReceived += (_, e) => { if (e.Data != null) log?.Invoke("[TUN] " + e.Data); };
+            proc.ErrorDataReceived += (_, e) => { if (e.Data != null) log?.Invoke("[TUN] " + e.Data); };
+            proc.Exited += (_, _) => { if (!_stopping && _tunProcess == proc) { try { OnProcessExited?.Invoke(proc.ExitCode); } catch (InvalidOperationException) { } } };
+            _job = new ChildProcessJob();
+            proc.Start();
+            _job.Attach(proc);
+            proc.BeginOutputReadLine();
+            proc.BeginErrorReadLine();
+            var ready = false;
+            for (int i = 0; i < 50; i++)
             {
-                log?.Invoke("[TUN ERROR] Файлы tun2socks.exe или wintun.dll не найдены в core/.");
-                return false;
+                ct.ThrowIfCancellationRequested();
+                if (proc.HasExited) throw new IOException($"tun2socks завершился с кодом {proc.ExitCode}.");
+                ready = NetworkInterface.GetAllNetworkInterfaces().Any(n => n.Name == DeviceName);
+                if (ready) break;
+                await Task.Delay(100, ct).ConfigureAwait(false);
             }
-
-            // Resolve server IP to avoid routing loops
-            _originalGateway = GetDefaultGateway();
-            _bypassedServerIp = ResolveIp(serverHost);
-
-            log?.Invoke($"[TUN] Запуск Wintun адаптера '{TunDeviceName}' через SOCKS5 :{socksPort}...");
-
-            var psi = new ProcessStartInfo
-            {
-                FileName = tunExe,
-                Arguments = $"-device wintun://{TunDeviceName} -proxy socks5://127.0.0.1:{socksPort} -loglevel warn",
-                WorkingDirectory = Path.Combine(baseDir, "core"),
-                CreateNoWindow = true,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true
-            };
-
-            _tunProcess = Process.Start(psi);
-            if (_tunProcess == null || _tunProcess.HasExited)
-            {
-                log?.Invoke("[TUN ERROR] Не удалось запустить процесс tun2socks.exe");
-                return false;
-            }
-
-            // Allow the virtual adapter to initialize in Windows
-            await Task.Delay(1000);
-
-            // Configure IP and Gateway on the virtual adapter
-            RunCmd($"netsh interface ip set address name=\"{TunDeviceName}\" static {TunIp} {TunMask} {TunGateway}");
-            RunCmd($"netsh interface ip set dns name=\"{TunDeviceName}\" static 1.1.1.1");
-
-            // Bypass route for the remote VPN server host through physical gateway
-            if (!string.IsNullOrEmpty(_bypassedServerIp) && !string.IsNullOrEmpty(_originalGateway))
-            {
-                RunCmd($"route add {_bypassedServerIp} mask 255.255.255.255 {_originalGateway} metric 1");
-            }
-
-            // Route all internet traffic through Wintun
-            RunCmd($"route add 0.0.0.0 mask 128.0.0.0 {TunGateway} metric 5");
-            RunCmd($"route add 128.0.0.0 mask 128.0.0.0 {TunGateway} metric 5");
-
-            log?.Invoke("[TUN] Wintun адаптер успешно поднят! Весь сетевой трафик Windows направлен в туннель.");
+            if (!ready) throw new TimeoutException("Windows не создала адаптер SplateTUN.");
+            await NetshAsync(ct, "interface", "ipv4", "set", "address", $"name={DeviceName}", "source=static", "address=172.19.0.1", "mask=255.255.255.252", "gateway=none").ConfigureAwait(false);
+            await NetshAsync(ct, "interface", "ipv4", "set", "dnsservers", $"name={DeviceName}", "source=static", "address=1.1.1.1", "register=none", "validate=no").ConfigureAwait(false);
+            await NetshAsync(ct, "interface", "ipv4", "set", "interface", $"interface={DeviceName}", "metric=1").ConfigureAwait(false);
+            // Xray's outbound sockets are bound to uplink.Name before these routes are installed.
+            // This also keeps smart-RU direct traffic out of the tunnel and prevents recursion.
+            // Capture IPv6 as well: otherwise IPv6-capable desktop apps bypass an IPv4-only TUN.
+            await NetshAsync(ct, "interface", "ipv6", "add", "address", DeviceName, "fdfe:dcba:9876::1/64", "store=active").ConfigureAwait(false);
+            await WaitForAddressesAsync(DeviceName, "172.19.0.1", "fdfe:dcba:9876::1", ct).ConfigureAwait(false);
+            await AddRouteAsync("ipv4", "0.0.0.0/1", ct).ConfigureAwait(false);
+            await AddRouteAsync("ipv4", "128.0.0.0/1", ct).ConfigureAwait(false);
+            await AddRouteAsync("ipv6", "::/1", ct).ConfigureAwait(false);
+            await AddRouteAsync("ipv6", "8000::/1", ct).ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+            if (proc.HasExited) throw new IOException("TUN остановился во время настройки маршрутов.");
+            log?.Invoke($"[TUN] IPv4/IPv6 → SplateTUN; выход Xray → {uplink.Name}. IPv6: {(blockIpv6 ? "блокируется ядром" : "через туннель")}.");
             return true;
         }
+        catch (OperationCanceledException)
+        {
+            await StopCoreAsync(log).ConfigureAwait(false);
+            throw;
+        }
         catch (Exception ex)
         {
-            log?.Invoke($"[TUN ERROR] Ошибка инициализации TUN: {ex.Message}");
-            StopTun();
+            log?.Invoke("[TUN ERROR] " + ex.Message);
+            await StopCoreAsync(log).ConfigureAwait(false);
             return false;
         }
+        finally { _lifecycle.Release(); }
     }
 
-    public void StopTun(Action<string>? log = null)
+    internal static async Task WaitForAddressesAsync(string deviceName, string ipv4, string ipv6, CancellationToken ct = default)
     {
-        try
+        for (var i = 0; i < 80; i++)
         {
-            // Remove routes
-            RunCmd($"route delete 0.0.0.0 mask 128.0.0.0 {TunGateway}");
-            RunCmd($"route delete 128.0.0.0 mask 128.0.0.0 {TunGateway}");
-
-            if (!string.IsNullOrEmpty(_bypassedServerIp))
+            ct.ThrowIfCancellationRequested();
+            var nic = NetworkInterface.GetAllNetworkInterfaces().FirstOrDefault(n => n.Name == deviceName);
+            if (nic?.OperationalStatus == OperationalStatus.Up)
             {
-                RunCmd($"route delete {_bypassedServerIp} mask 255.255.255.255");
-                _bypassedServerIp = null;
+                var addresses = nic.GetIPProperties().UnicastAddresses;
+                bool Ready(string ip) => addresses.Any(a => a.Address.ToString() == ip && a.DuplicateAddressDetectionState == DuplicateAddressDetectionState.Preferred);
+                if (Ready(ipv4) && Ready(ipv6)) return;
+                if (addresses.Any(a => (a.Address.ToString() == ipv4 || a.Address.ToString() == ipv6) && a.DuplicateAddressDetectionState == DuplicateAddressDetectionState.Duplicate))
+                    throw new IOException("Адрес TUN конфликтует с другим устройством.");
             }
-
-            if (_tunProcess != null)
-            {
-                if (!_tunProcess.HasExited)
-                {
-                    _tunProcess.Kill(true);
-                    _tunProcess.WaitForExit(1500);
-                }
-                _tunProcess.Dispose();
-                _tunProcess = null;
-                log?.Invoke("[TUN] Виртуальный адаптер TUN остановлен.");
-            }
+            await Task.Delay(100, ct).ConfigureAwait(false);
         }
-        catch (Exception ex)
-        {
-            log?.Invoke($"[TUN ERROR] Ошибка остановки TUN: {ex.Message}");
-        }
+        throw new TimeoutException("Windows не завершила настройку IPv4/IPv6 адресов TUN.");
     }
 
-    private static string? ResolveIp(string host)
+    internal static ProcessStartInfo BuildStartInfo(string coreDir, string deviceName, int socksPort)
     {
-        if (IPAddress.TryParse(host, out _))
-            return host;
-
-        try
+        if (socksPort is < 1 or > 65535) throw new ArgumentOutOfRangeException(nameof(socksPort));
+        var psi = new ProcessStartInfo(Path.Combine(coreDir, "tun2socks.exe"))
         {
-            var addresses = Dns.GetHostAddresses(host);
-            foreach (var addr in addresses)
-            {
-                if (addr.AddressFamily == AddressFamily.InterNetwork)
-                    return addr.ToString();
-            }
-        }
-        catch { }
-        return null;
+            WorkingDirectory = coreDir, UseShellExecute = false, CreateNoWindow = true,
+            RedirectStandardOutput = true, RedirectStandardError = true
+        };
+        // "tun" is the device driver; Wintun is its Windows implementation.
+        foreach (var arg in new[] { "--device", $"tun://{deviceName}", "--proxy", $"socks5://127.0.0.1:{socksPort}",
+            "--mtu", "1500", "--tcp-auto-tuning", "--loglevel", "warn" }) psi.ArgumentList.Add(arg);
+        return psi;
     }
 
-    private static string? GetDefaultGateway()
+    private async Task AddRouteAsync(string family, string prefix, CancellationToken ct)
     {
-        try
-        {
-            var psi = new ProcessStartInfo
-            {
-                FileName = "cmd.exe",
-                Arguments = "/c route print 0.0.0.0",
-                CreateNoWindow = true,
-                UseShellExecute = false,
-                RedirectStandardOutput = true
-            };
-            using var proc = Process.Start(psi);
-            if (proc == null) return null;
-            var output = proc.StandardOutput.ReadToEnd();
-            proc.WaitForExit(1000);
-
-            var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-            foreach (var line in lines)
-            {
-                var parts = line.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length >= 5 && parts[0] == "0.0.0.0" && parts[1] == "0.0.0.0")
-                {
-                    // parts[2] is Gateway
-                    return parts[2];
-                }
-            }
-        }
-        catch { }
-        return null;
+        await NetshAsync(ct, "interface", family, "add", "route", $"prefix={prefix}", $"interface={DeviceName}", family == "ipv4" ? "nexthop=0.0.0.0" : "nexthop=::", "metric=1", "store=active").ConfigureAwait(false);
+        _routes.Add((family, prefix));
     }
 
-    private static void RunCmd(string command)
+    public void StopTun(Action<string>? log = null) => StopTunAsync(log).GetAwaiter().GetResult();
+
+    public async Task StopTunAsync(Action<string>? log = null)
     {
-        try
+        await _lifecycle.WaitAsync().ConfigureAwait(false);
+        try { await StopCoreAsync(log).ConfigureAwait(false); }
+        finally { _lifecycle.Release(); }
+    }
+
+    private async Task StopCoreAsync(Action<string>? log)
+    {
+        _stopping = true;
+        foreach (var route in _routes.AsEnumerable().Reverse().ToArray())
         {
-            var psi = new ProcessStartInfo
+            try
             {
-                FileName = "cmd.exe",
-                Arguments = $"/c {command}",
-                CreateNoWindow = true,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true
-            };
-            using var proc = Process.Start(psi);
-            proc?.WaitForExit(2000);
+                await NetshAsync(CancellationToken.None, "interface", route.Family, "delete", "route", $"prefix={route.Prefix}", $"interface={DeviceName}", "store=active").ConfigureAwait(false);
+                _routes.Remove(route);
+            }
+            catch (Exception ex) { log?.Invoke("[TUN CLEANUP] " + ex.Message); }
         }
-        catch { }
+        var proc = _tunProcess;
+        _tunProcess = null;
+        if (proc == null) { _job?.Dispose(); _job = null; return; }
+        try { if (!proc.HasExited) { proc.Kill(true); await proc.WaitForExitAsync().ConfigureAwait(false); } }
+        catch (Exception ex) { log?.Invoke("[TUN CLEANUP] " + ex.Message); }
+        finally { proc.Dispose(); _job?.Dispose(); _job = null; }
+        log?.Invoke("[TUN] Адаптер остановлен, маршруты освобождены.");
+    }
+
+    private static Task<string> NetshAsync(CancellationToken ct, params string[] args) => RunAsync("netsh.exe", args, ct);
+
+    internal static async Task<string> RunAsync(string exe, IEnumerable<string> args, CancellationToken ct = default)
+    {
+        var psi = new ProcessStartInfo(exe) { UseShellExecute = false, CreateNoWindow = true,
+            RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (var arg in args) psi.ArgumentList.Add(arg);
+        using var proc = Process.Start(psi) ?? throw new IOException($"Не удалось запустить {exe}.");
+        var stdout = proc.StandardOutput.ReadToEndAsync();
+        var stderr = proc.StandardError.ReadToEndAsync();
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(15));
+        try { await proc.WaitForExitAsync(timeout.Token).ConfigureAwait(false); }
+        catch { try { if (!proc.HasExited) proc.Kill(true); } catch { } throw; }
+        var output = await stdout.ConfigureAwait(false);
+        var error = await stderr.ConfigureAwait(false);
+        if (proc.ExitCode != 0) throw new IOException($"{exe} ({proc.ExitCode}): {output.Trim()} {error.Trim()}");
+        return output;
     }
 }

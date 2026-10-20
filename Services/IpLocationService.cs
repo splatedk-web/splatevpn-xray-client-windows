@@ -26,26 +26,39 @@ public static class IpLocationService
         "http://www.msftconnecttest.com/connecttest.txt"
     ];
 
-    public static async Task<(bool Success, long RttMs)> CheckConnectivityAsync(int socksPort = 10808, int timeoutMs = 4000)
+    public static async Task<(bool Success, long RttMs)> CheckConnectivityAsync(int socksPort = 10808, int timeoutMs = 4000, CancellationToken ct = default)
     {
         var sw = Stopwatch.StartNew();
         foreach (var endpoint in HealthCheckEndpoints)
         {
+            ct.ThrowIfCancellationRequested();
             try
             {
                 using var handler = new SocketsHttpHandler
                 {
-                    Proxy = new WebProxy($"socks5://127.0.0.1:{socksPort}"),
-                    UseProxy = true,
                     ConnectTimeout = TimeSpan.FromMilliseconds(timeoutMs)
                 };
+
+                if (socksPort > 0 && socksPort <= 65535)
+                {
+                    handler.Proxy = new WebProxy($"socks5://127.0.0.1:{socksPort}");
+                    handler.UseProxy = true;
+                }
+                else
+                {
+                    handler.UseProxy = false;
+                }
+
                 using var client = new HttpClient(handler)
                 {
                     Timeout = TimeSpan.FromMilliseconds(timeoutMs)
                 };
                 client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
 
-                using var response = await client.GetAsync(endpoint);
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                cts.CancelAfter(timeoutMs);
+                sw.Restart();
+                using var response = await client.GetAsync(endpoint, cts.Token).ConfigureAwait(false);
                 if (response.IsSuccessStatusCode || (int)response.StatusCode == 204)
                 {
                     sw.Stop();
@@ -87,7 +100,7 @@ public static class IpLocationService
                         flag = CountryCodeToEmoji(countryCode);
                     }
 
-                    return new IpDetails(ip, country, countryCode, city, flag, true);
+                    if (IPAddress.TryParse(ip, out _)) return new IpDetails(ip, country, countryCode, city, flag, true);
                 }
             }
         }
@@ -106,7 +119,7 @@ public static class IpLocationService
                 var countryCode = root.TryGetProperty("country_code", out var cc) ? cc.GetString() ?? "" : "";
                 var city = root.TryGetProperty("city", out var ct) ? ct.GetString() ?? "" : "";
 
-                if (!string.IsNullOrEmpty(ip))
+                if (IPAddress.TryParse(ip, out _))
                 {
                     return new IpDetails(ip, country, countryCode, city, CountryCodeToEmoji(countryCode), true);
                 }
@@ -126,7 +139,7 @@ public static class IpLocationService
                 var country = root.TryGetProperty("country", out var cnt) ? cnt.GetString() ?? "" : "";
                 var city = root.TryGetProperty("city", out var ct) ? ct.GetString() ?? "" : "";
 
-                if (!string.IsNullOrEmpty(ip))
+                if (IPAddress.TryParse(ip, out _))
                 {
                     return new IpDetails(ip, country, country, city, CountryCodeToEmoji(country), true);
                 }
@@ -141,10 +154,19 @@ public static class IpLocationService
     {
         using var handler = new SocketsHttpHandler
         {
-            Proxy = new WebProxy($"socks5://127.0.0.1:{socksPort}"),
-            UseProxy = true,
             ConnectTimeout = TimeSpan.FromMilliseconds(timeoutMs)
         };
+
+        if (socksPort > 0 && socksPort <= 65535)
+        {
+            handler.Proxy = new WebProxy($"socks5://127.0.0.1:{socksPort}");
+            handler.UseProxy = true;
+        }
+        else
+        {
+            handler.UseProxy = false;
+        }
+
         using var client = new HttpClient(handler)
         {
             Timeout = TimeSpan.FromMilliseconds(timeoutMs)
@@ -152,10 +174,11 @@ public static class IpLocationService
         client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
         client.DefaultRequestHeaders.Accept.ParseAdd("application/json");
 
-        var response = await client.GetAsync(url);
+        using var cts = new CancellationTokenSource(timeoutMs);
+        using var response = await client.GetAsync(url, cts.Token).ConfigureAwait(false);
         if (response.IsSuccessStatusCode)
         {
-            return await response.Content.ReadAsStringAsync();
+            return await response.Content.ReadAsStringAsync().ConfigureAwait(false);
         }
         return null;
     }

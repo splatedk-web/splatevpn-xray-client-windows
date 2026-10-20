@@ -1,0 +1,2 @@
+Built-in image_gen; transparent background.
+Prompt: Create Kiko, Bloom’s blue rabbit pet from Winx Club, full-body 2D cartoon cutout, pale periwinkle fur, pink inner ears, friendly eyes, white fluffy chest, sitting and waving, tiny pink sparkle. Entire silhouette visible, facing slightly right; pastel blush/lilac app palette; transparent background, no UI, text or watermark.

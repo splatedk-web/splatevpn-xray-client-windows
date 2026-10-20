@@ -6,6 +6,11 @@ namespace SplateClientDesktop.Models;
 
 public class SubscriptionItem : INotifyPropertyChanged
 {
+    private bool _enabled = true;
+    public bool Enabled { get => _enabled; set => SetField(ref _enabled, value); }
+    public string FallbackUrl { get; set; } = "";
+    public bool IsPreset => PresetId(Id);
+    private static bool PresetId(string id) => id is "preset_white_cidr" or "preset_harvester" or "preset_white_universal";
     private string _id = Guid.NewGuid().ToString();
     private string _name = "Подписка";
     private string _url = "";
@@ -104,6 +109,7 @@ public class SubscriptionItem : INotifyPropertyChanged
         set => SetField(ref _nodeCount, value);
     }
 
+    [System.Text.Json.Serialization.JsonIgnore]
     public bool IsUpdating
     {
         get => _isUpdating;

@@ -1,120 +1,70 @@
-using System;
-using System.Net.NetworkInformation;
-using System.Threading;
-using System.Threading.Tasks;
+using System.Diagnostics;
+using System.Net.Http;
+using System.Text.Json;
 
 namespace SplateClientDesktop.Services;
 
 public class TrafficMonitorService : ITrafficMonitorService, IDisposable
 {
-    private System.Threading.Timer? _timer;
-    private readonly TimeSpan _interval = TimeSpan.FromSeconds(1);
-    private long _prevBytesReceived;
-    private long _prevBytesSent;
-    private long _totalDownloaded;
-    private long _totalUploaded;
-    private readonly object _lock = new();
-
+    private CancellationTokenSource? _cts;
+    private readonly TrafficAccumulator _totals = new();
+    private readonly object _gate = new();
+    private int _generation;
     public event Action<string, string>? SpeedUpdated;
     public event Action<long, long>? BytesPerSecUpdated;
     public event Action<long, long>? SessionBytesUpdated;
 
-    public void Start()
+    public void Start(int metricsPort)
     {
-        // Reset counters
-        lock (_lock)
-        {
-            _prevBytesReceived = GetTotalBytesReceived();
-            _prevBytesSent = GetTotalBytesSent();
-            _totalDownloaded = 0;
-            _totalUploaded = 0;
-        }
-        _timer = new Timer(Callback, null, TimeSpan.Zero, _interval);
+        Begin(metricsPort, false);
+    }
+    public void Resume(int metricsPort) => Begin(metricsPort, true);
+    private void Begin(int port, bool preserve)
+    {
+        lock (_gate) { Stop(); _totals.NewCore(preserve); _cts = new(); _ = MonitorAsync(port, _generation, _cts.Token); }
     }
 
-    public void Stop()
+    private async Task MonitorAsync(int port, int generation, CancellationToken ct)
     {
-        _timer?.Dispose();
-        _timer = null;
-    }
-
-    private void Callback(object? state)
-    {
+        using var handler = new SocketsHttpHandler { UseProxy = false, ConnectTimeout = TimeSpan.FromSeconds(1) };
+        using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(2) };
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+        var clock = Stopwatch.StartNew();
+        double previousTime = 0;
         try
         {
-            var currentReceived = GetTotalBytesReceived();
-            var currentSent = GetTotalBytesSent();
-            long deltaReceived, deltaSent;
-            lock (_lock)
+            do
             {
-                deltaReceived = _prevBytesReceived > 0 ? Math.Max(0, currentReceived - _prevBytesReceived) : 0;
-                deltaSent = _prevBytesSent > 0 ? Math.Max(0, currentSent - _prevBytesSent) : 0;
-                _prevBytesReceived = currentReceived;
-                _prevBytesSent = currentSent;
-                _totalDownloaded += deltaReceived;
-                _totalUploaded += deltaSent;
-            }
-            var downloadSpeed = FormatSpeed(deltaReceived);
-            var uploadSpeed = FormatSpeed(deltaSent);
-            SpeedUpdated?.Invoke(downloadSpeed, uploadSpeed);
-            BytesPerSecUpdated?.Invoke(deltaReceived, deltaSent);
-            SessionBytesUpdated?.Invoke(_totalDownloaded, _totalUploaded);
-        }
-        catch
-        {
-            // Swallow any exception to keep timer alive
-        }
-    }
-
-    private static long GetTotalBytesReceived()
-    {
-        long total = 0;
-        try
-        {
-            foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
-            {
-                if (ni.OperationalStatus != OperationalStatus.Up || ni.NetworkInterfaceType == NetworkInterfaceType.Loopback)
-                    continue;
                 try
                 {
-                    total += ni.GetIPv4Statistics().BytesReceived;
+                    var json = await client.GetStringAsync($"http://127.0.0.1:{port}/debug/vars", ct).ConfigureAwait(false);
+                    using var doc = JsonDocument.Parse(json);
+                    var outbounds = doc.RootElement.GetProperty("stats").GetProperty("outbound");
+                    long down = 0, up = 0;
+                    foreach (var tag in new[] { "proxy", "ai-smartdns" })
+                        if (outbounds.TryGetProperty(tag, out var stats))
+                        {
+                            down += stats.GetProperty("downlink").GetInt64();
+                            up += stats.GetProperty("uplink").GetInt64();
+                        }
+                    var now = clock.Elapsed.TotalSeconds;
+                    lock (_gate)
+                    {
+                        if (ct.IsCancellationRequested || generation != _generation) return;
+                        var sample = _totals.Observe(down, up, now - previousTime); previousTime = now;
+                        SpeedUpdated?.Invoke(FormatSpeed(sample.DownBps), FormatSpeed(sample.UpBps));
+                        BytesPerSecUpdated?.Invoke(sample.DownBps, sample.UpBps);
+                        SessionBytesUpdated?.Invoke(sample.Download, sample.Upload);
+                    }
                 }
-                catch { }
-            }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                catch (Exception ex) { Debug.WriteLine("Xray metrics: " + ex.Message); }
+            } while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false));
         }
-        catch { }
-        return total;
+        catch (OperationCanceledException) { }
     }
 
-    private static long GetTotalBytesSent()
-    {
-        long total = 0;
-        try
-        {
-            foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
-            {
-                if (ni.OperationalStatus != OperationalStatus.Up || ni.NetworkInterfaceType == NetworkInterfaceType.Loopback)
-                    continue;
-                try
-                {
-                    total += ni.GetIPv4Statistics().BytesSent;
-                }
-                catch { }
-            }
-        }
-        catch { }
-        return total;
-    }
-
-    private static string FormatSpeed(long bytesPerSec)
-    {
-        if (bytesPerSec < 1024) return $"{bytesPerSec} B/s";
-        if (bytesPerSec < 1024 * 1024) return $"{bytesPerSec / 1024.0:F1} KB/s";
-        return $"{bytesPerSec / (1024.0 * 1024):F1} MB/s";
-    }
-
-    public void Dispose()
-    {
-        Stop();
-    }
+    public void Stop() { lock (_gate) { _generation++; _cts?.Cancel(); _cts?.Dispose(); _cts = null; } }
+    public void Dispose() => Stop();
+    private static string FormatSpeed(long n) => n < 1024 ? $"{n} B/s" : n < 1048576 ? $"{n / 1024.0:F1} KB/s" : $"{n / 1048576.0:F1} MB/s";
 }

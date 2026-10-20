@@ -4,6 +4,34 @@ using System.Collections.Generic;
 
 public class AppSettings
 {
+    public double GlassTransparency { get; set; }
+    public bool GlassBlurEnabled { get; set; } = true;
+    public bool GroupServers { get; set; } = true;
+    public string BalancerMode { get; set; } = "balanced";
+    public int BalancerHealthSeconds { get; set; } = 2;
+    public int BalancerFailureConfirmations { get; set; } = 2;
+    public int BalancerOptimizationMinutes { get; set; } = 5;
+    public int BalancerCooldownSeconds { get; set; } = 60;
+    public int BalancerImprovementPercent { get; set; } = 30;
+    public bool PresetSubscriptionsInitialized { get; set; }
+    public string AiRoutingMode { get; set; } = "dns_ai";
+    public bool EnableAiDns { get; set; }
+    public string AiDnsProvider { get; set; } = "dns_ai";
+    public bool AiTlsFragment { get; set; }
+    public string AdBlockAllowlist { get; set; } = "";
+    public string CustomDohUrl { get; set; } = "https://dns.google/dns-query";
+    public bool EnableAdBlock { get; set; } = true;
+    public string CustomBlockRules { get; set; } = string.Empty;
+    public bool EnableMux { get; set; }
+    public int MuxConcurrency { get; set; } = 8;
+    public string TlsFragmentLength { get; set; } = "100-200";
+    public string TlsFragmentInterval { get; set; } = "10-20";
+    public string TlsFragmentPackets { get; set; } = "tlshello";
+    public bool ShareLan { get; set; }
+    public string ServerSort { get; set; } = "default";
+    public string ServerFilter { get; set; } = "all";
+    public int SettingsSchemaVersion { get; set; }
+    public string Theme { get; set; } = "dark";
     public string RoutingMode { get; set; } = "smart_ru"; // smart_ru, global
     public string DnsProvider { get; set; } = "cloudflare"; // cloudflare, google, quad9, adguard, yandex, xbox
     public bool EnableSniffing { get; set; } = true;
@@ -27,14 +55,15 @@ public class AppSettings
     public SubscriptionTier SubscriptionTier { get; set; } = SubscriptionTier.Free;
     public List<RoutingProfile> RoutingProfiles { get; set; } = new();
     public string ActiveRoutingProfile { get; set; } = string.Empty;
-    public bool AutoUpdateSubscription { get; set; } = false;
+    public bool AutoUpdateSubscription { get; set; } = true;
+    public bool EnableAiXboxDns { get; set; } = false;
     public bool EnableAiBypass { get; set; } = true;
     public long SubscriptionDataLimit { get; set; } = 0;
     public long SubscriptionDataUsed { get; set; } = 0;
     public string SubscriptionExpiry { get; set; } = string.Empty;
     public string CustomProxyRules { get; set; } = string.Empty;
     public string CustomDirectRules { get; set; } = string.Empty;
-    
+
     // --- Advanced Features ---
     public bool EnableTunMode { get; set; } = false;
     public bool EnableKillSwitch { get; set; } = false;

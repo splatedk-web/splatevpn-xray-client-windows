@@ -7,15 +7,15 @@
       xmlns:viewmodels="clr-namespace:SplateClientDesktop.ViewModels"
       xmlns:converters="clr-namespace:SplateClientDesktop.Converters"
       mc:Ignorable="d" 
-      d:DesignHeight="750" d:DesignWidth="950"
+      d:DesignHeight="780" d:DesignWidth="950"
       Title="Servers">
 
     <Page.Resources>
         <converters:InverseBoolConverter x:Key="InverseBoolConverter"/>
 
         <Style x:Key="MiniActionButton" TargetType="Button">
-            <Setter Property="Background" Value="#10FFFFFF"/>
-            <Setter Property="BorderBrush" Value="#18FFFFFF"/>
+            <Setter Property="Background" Value="#12FFFFFF"/>
+            <Setter Property="BorderBrush" Value="#1EFFFFFF"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}"/>
             <Setter Property="Padding" Value="7,5"/>
@@ -31,11 +31,11 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="bd" Property="Background" Value="#22FFFFFF"/>
-                                <Setter TargetName="bd" Property="BorderBrush" Value="#40FFFFFF"/>
+                                <Setter TargetName="bd" Property="Background" Value="#25FFFFFF"/>
+                                <Setter TargetName="bd" Property="BorderBrush" Value="#45FFFFFF"/>
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="bd" Property="Background" Value="#30FFFFFF"/>
+                                <Setter TargetName="bd" Property="Background" Value="#35FFFFFF"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -46,22 +46,134 @@
 
     <Grid Margin="18,10,18,14">
         <Grid.RowDefinitions>
-            <!-- 0: Subscriptions Section -->
+            <!-- 0: 4-Tab View Mode Bar (Matching Android NodeViewMode) -->
             <RowDefinition Height="Auto"/>
-            <!-- 1: Server Add & Paste Bar -->
+            <!-- 1: Subscriptions Section -->
             <RowDefinition Height="Auto"/>
-            <!-- 2: Search & Filter Toolbar -->
+            <!-- 2: Server Add & Paste Bar -->
             <RowDefinition Height="Auto"/>
-            <!-- 3: Servers List Header -->
+            <!-- 3: Search & Filter Toolbar -->
             <RowDefinition Height="Auto"/>
-            <!-- 4: Servers ListView -->
+            <!-- 4: Servers List Header -->
+            <RowDefinition Height="Auto"/>
+            <!-- 5: Servers ListView -->
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
         <!-- ============================================== -->
-        <!-- ROW 0: Subscriptions Management Card           -->
+        <!-- ROW 0: 4-Tab Mode Bar (ALL, PRESET, SUBS, PERS) -->
         <!-- ============================================== -->
-        <Expander Grid.Row="0" Margin="0,0,0,10" IsExpanded="False">
+        <Border Grid.Row="0" Margin="0,0,0,10" Background="#DD0E1729" BorderBrush="#1E2B42" BorderThickness="1" CornerRadius="8" Padding="4">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Tab 0: Все узлы (ALL) -->
+                <Border Grid.Column="0" CornerRadius="6" Margin="2,0">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="Background" Value="Transparent"/>
+                            <Setter Property="BorderThickness" Value="1"/>
+                            <Setter Property="BorderBrush" Value="Transparent"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedNodeTab}" Value="0">
+                                    <Setter Property="Background" Value="#2000F0FF"/>
+                                    <Setter Property="BorderBrush" Value="#6000F0FF"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <Button Command="{Binding SetNodeTabCommand}" CommandParameter="0"
+                            Background="Transparent" BorderThickness="0" Cursor="Hand" Padding="6,7" HorizontalAlignment="Stretch">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                            <ui:SymbolIcon Symbol="Grid24" FontSize="13" Foreground="#00F0FF" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                            <TextBlock Text="Все узлы" FontWeight="Bold" FontSize="11.5" Foreground="#F1F5F9" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                </Border>
+
+                <!-- Tab 1: Предустановленные (PRESET) -->
+                <Border Grid.Column="1" CornerRadius="6" Margin="2,0">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="Background" Value="Transparent"/>
+                            <Setter Property="BorderThickness" Value="1"/>
+                            <Setter Property="BorderBrush" Value="Transparent"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedNodeTab}" Value="1">
+                                    <Setter Property="Background" Value="#2010E79D"/>
+                                    <Setter Property="BorderBrush" Value="#6010E79D"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <Button Command="{Binding SetNodeTabCommand}" CommandParameter="1"
+                            Background="Transparent" BorderThickness="0" Cursor="Hand" Padding="6,7" HorizontalAlignment="Stretch">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                            <ui:SymbolIcon Symbol="Star24" FontSize="13" Foreground="#10E79D" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                            <TextBlock Text="Предустановленные" FontWeight="Bold" FontSize="11.5" Foreground="#F1F5F9" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                </Border>
+
+                <!-- Tab 2: Подписки (SUBSCRIPTIONS) -->
+                <Border Grid.Column="2" CornerRadius="6" Margin="2,0">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="Background" Value="Transparent"/>
+                            <Setter Property="BorderThickness" Value="1"/>
+                            <Setter Property="BorderBrush" Value="Transparent"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedNodeTab}" Value="2">
+                                    <Setter Property="Background" Value="#20A78BFA"/>
+                                    <Setter Property="BorderBrush" Value="#60A78BFA"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <Button Command="{Binding SetNodeTabCommand}" CommandParameter="2"
+                            Background="Transparent" BorderThickness="0" Cursor="Hand" Padding="6,7" HorizontalAlignment="Stretch">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                            <ui:SymbolIcon Symbol="Globe24" FontSize="13" Foreground="#A78BFA" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                            <TextBlock Text="Подписки" FontWeight="Bold" FontSize="11.5" Foreground="#F1F5F9" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                </Border>
+
+                <!-- Tab 3: Личные (PERSONAL) -->
+                <Border Grid.Column="3" CornerRadius="6" Margin="2,0">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="Background" Value="Transparent"/>
+                            <Setter Property="BorderThickness" Value="1"/>
+                            <Setter Property="BorderBrush" Value="Transparent"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedNodeTab}" Value="3">
+                                    <Setter Property="Background" Value="#20FFB300"/>
+                                    <Setter Property="BorderBrush" Value="#60FFB300"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <Button Command="{Binding SetNodeTabCommand}" CommandParameter="3"
+                            Background="Transparent" BorderThickness="0" Cursor="Hand" Padding="6,7" HorizontalAlignment="Stretch">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                            <ui:SymbolIcon Symbol="Person24" FontSize="13" Foreground="#FFB300" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                            <TextBlock Text="Личные" FontWeight="Bold" FontSize="11.5" Foreground="#F1F5F9" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                </Border>
+            </Grid>
+        </Border>
+
+        <!-- ============================================== -->
+        <!-- ROW 1: Subscriptions Management Card           -->
+        <!-- ============================================== -->
+        <Expander Grid.Row="1" Margin="0,0,0,10" IsExpanded="False" Background="#DD0E1729" BorderBrush="#1E2B42">
             <Expander.Header>
                 <Grid HorizontalAlignment="Stretch" Margin="0,2">
                     <Grid.ColumnDefinitions>
@@ -72,12 +184,12 @@
                     </Grid.ColumnDefinitions>
 
                     <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                        <ui:SymbolIcon Symbol="ArrowSync24" FontSize="14" Foreground="#10B981" Margin="0,0,8,0"/>
-                        <TextBlock Text="Управление подписками" FontWeight="Bold" FontSize="12.5" Foreground="{DynamicResource TextFillColorPrimaryBrush}" VerticalAlignment="Center"/>
+                        <ui:SymbolIcon Symbol="ArrowSync24" FontSize="14" Foreground="#10E79D" Margin="0,0,8,0"/>
+                        <TextBlock Text="Управление подписками" FontWeight="Bold" FontSize="12.5" Foreground="#F1F5F9" VerticalAlignment="Center"/>
                     </StackPanel>
 
-                    <Border Grid.Column="1" Background="#1810B981" BorderBrush="#3510B981" BorderThickness="1" CornerRadius="8" Padding="7,2" Margin="10,0,0,0" VerticalAlignment="Center">
-                        <TextBlock FontSize="10.5" FontWeight="Bold" Foreground="#34D399">
+                    <Border Grid.Column="1" Background="#1810E79D" BorderBrush="#3510E79D" BorderThickness="1" CornerRadius="8" Padding="7,2" Margin="10,0,0,0" VerticalAlignment="Center">
+                        <TextBlock FontSize="10.5" FontWeight="Bold" Foreground="#10E79D">
                             <Run Text="{Binding Subscriptions.Count, Mode=OneWay}"/>
                             <Run Text=" подписок"/>
                         </TextBlock>
@@ -103,11 +215,11 @@
                 </Grid>
             </Expander.Header>
 
-            <Border Background="#0CFFFFFF" CornerRadius="8" Padding="10" Margin="0,6,0,0" BorderThickness="1" BorderBrush="#14FFFFFF">
+            <Border Background="#121A2B" CornerRadius="8" Padding="10" Margin="0,6,0,0" BorderThickness="1" BorderBrush="#1E2B42">
                 <StackPanel>
                     <!-- Empty Subscriptions Placeholder -->
                     <TextBlock Text="У вас пока нет добавленных подписок. Нажмите «Добавить подписку» или вставьте ссылку ниже."
-                               FontSize="11.5" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                               FontSize="11.5" Foreground="#7E92B0"
                                HorizontalAlignment="Center" Margin="0,6,0,6">
                         <TextBlock.Style>
                             <Style TargetType="TextBlock">
@@ -125,7 +237,7 @@
                     <ItemsControl ItemsSource="{Binding Subscriptions}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Border CornerRadius="8" Margin="0,0,0,6" Padding="12,8" Background="#10FFFFFF" BorderThickness="1" BorderBrush="#18FFFFFF">
+                                <Border CornerRadius="8" Margin="0,0,0,6" Padding="12,8" Background="#0CFFFFFF" BorderThickness="1" BorderBrush="#1E2B42">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="Auto"/>
@@ -135,33 +247,33 @@
                                         </Grid.ColumnDefinitions>
 
                                         <!-- Sub Icon -->
-                                        <Border Grid.Column="0" Width="32" Height="32" CornerRadius="6" Background="#1510B981" Margin="0,0,10,0" VerticalAlignment="Center">
-                                            <ui:SymbolIcon Symbol="Globe24" FontSize="15" Foreground="#34D399" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        <Border Grid.Column="0" Width="32" Height="32" CornerRadius="6" Background="#1810E79D" Margin="0,0,10,0" VerticalAlignment="Center">
+                                            <ui:SymbolIcon Symbol="Globe24" FontSize="15" Foreground="#10E79D" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                         </Border>
 
                                         <!-- Name & Info -->
                                         <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                             <StackPanel Orientation="Horizontal">
-                                                <TextBlock Text="{Binding Name}" FontWeight="Bold" FontSize="12.5" Foreground="{DynamicResource TextFillColorPrimaryBrush}" TextTrimming="CharacterEllipsis"/>
+                                                <TextBlock Text="{Binding Name}" FontWeight="Bold" FontSize="12.5" Foreground="#F1F5F9" TextTrimming="CharacterEllipsis"/>
                                                 <Border Background="#15FFFFFF" CornerRadius="5" Padding="6,1" Margin="8,0,0,0">
-                                                    <TextBlock FontSize="9.5" FontWeight="SemiBold" Foreground="{DynamicResource TextFillColorSecondaryBrush}">
+                                                    <TextBlock FontSize="9.5" FontWeight="SemiBold" Foreground="#94A3B8">
                                                         <Run Text="{Binding NodeCount, Mode=OneWay}"/>
                                                         <Run Text=" узлов"/>
                                                     </TextBlock>
                                                 </Border>
                                             </StackPanel>
-                                            <TextBlock Text="{Binding Url}" FontSize="10" Foreground="{DynamicResource TextFillColorTertiaryBrush}" TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
-                                            <TextBlock Text="{Binding LastUpdatedDisplay}" FontSize="9.5" Foreground="{DynamicResource TextFillColorTertiaryBrush}" Margin="0,1,0,0"/>
+                                            <TextBlock Text="{Binding Url}" FontSize="10" Foreground="#7E92B0" TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
+                                            <TextBlock Text="{Binding LastUpdatedDisplay}" FontSize="9.5" Foreground="#7E92B0" Margin="0,1,0,0"/>
                                         </StackPanel>
 
                                         <!-- Traffic Quota Bar -->
                                         <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="10,0">
                                             <Grid Margin="0,0,0,3">
-                                                <TextBlock Text="{Binding FormattedUsage}" FontSize="10" FontWeight="SemiBold" Foreground="#34D399"/>
-                                                <TextBlock Text="{Binding FormattedExpiry}" FontSize="9.5" Foreground="{DynamicResource TextFillColorTertiaryBrush}" HorizontalAlignment="Right"/>
+                                                <TextBlock Text="{Binding FormattedUsage}" FontSize="10" FontWeight="SemiBold" Foreground="#10E79D"/>
+                                                <TextBlock Text="{Binding FormattedExpiry}" FontSize="9.5" Foreground="#7E92B0" HorizontalAlignment="Right"/>
                                             </Grid>
                                             <ProgressBar Height="4" Minimum="0" Maximum="100" Value="{Binding UsagePercentage, Mode=OneWay}"
-                                                         Foreground="#10B981" Background="#18FFFFFF" BorderThickness="0"/>
+                                                         Foreground="#10E79D" Background="#1E2B42" BorderThickness="0"/>
                                         </StackPanel>
 
                                         <!-- Action Buttons -->
@@ -171,7 +283,7 @@
                                                     Command="{Binding DataContext.UpdateSubscriptionCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
                                                     CommandParameter="{Binding}" ToolTip="Обновить этот список серверов">
                                                 <StackPanel Orientation="Horizontal">
-                                                    <ui:SymbolIcon Symbol="ArrowSync24" FontSize="11" Foreground="#10B981" Margin="0,0,4,0"/>
+                                                    <ui:SymbolIcon Symbol="ArrowSync24" FontSize="11" Foreground="#10E79D" Margin="0,0,4,0"/>
                                                     <TextBlock Text="Обновить" FontSize="10.5"/>
                                                 </StackPanel>
                                             </Button>
@@ -180,7 +292,7 @@
                                             <Button Style="{StaticResource MiniActionButton}"
                                                     Command="{Binding DataContext.DeleteSubscriptionCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
                                                     CommandParameter="{Binding}" ToolTip="Удалить подписку и входящие в неё серверы">
-                                                <ui:SymbolIcon Symbol="Delete24" FontSize="11" Foreground="#F87171"/>
+                                                <ui:SymbolIcon Symbol="Delete24" FontSize="11" Foreground="#FF3366"/>
                                             </Button>
                                         </StackPanel>
                                     </Grid>
@@ -193,9 +305,9 @@
         </Expander>
 
         <!-- ============================================== -->
-        <!-- ROW 1: Dedicated Server Add & Paste Bar        -->
+        <!-- ROW 2: Dedicated Server Add, Paste & Auto-Select Bar -->
         <!-- ============================================== -->
-        <ui:Card Grid.Row="1" Margin="0,0,0,10" Padding="12,10">
+        <ui:Card Grid.Row="2" Margin="0,0,0,10" Padding="12,10" Background="#DD0E1729" BorderBrush="#1E2B42">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -206,6 +318,8 @@
                 <Grid Grid.Row="0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="8"/>
+                        <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="8"/>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="8"/>
@@ -222,10 +336,10 @@
                     </ui:TextBox>
 
                     <!-- Add from textbox -->
-                    <ui:Button Grid.Column="2" Appearance="Primary" Padding="14,6" Height="34"
+                    <ui:Button Grid.Column="2" Appearance="Primary" Padding="13,6" Height="34"
                                Command="{Binding AddManualServerCommand}" ToolTip="Добавить узел или подписку из поля ввода">
                         <StackPanel Orientation="Horizontal">
-                            <ui:SymbolIcon Symbol="Add24" FontSize="13" Margin="0,0,6,0"/>
+                            <ui:SymbolIcon Symbol="Add24" FontSize="13" Margin="0,0,5,0"/>
                             <TextBlock Text="Добавить" FontWeight="SemiBold" FontSize="11.5"/>
                         </StackPanel>
                     </ui:Button>
@@ -233,19 +347,41 @@
                     <!-- Prominent Paste from Clipboard Button -->
                     <Button Grid.Column="4" Command="{Binding AddFromClipboardCommand}"
                             Height="34" Padding="14,6" Cursor="Hand"
-                            ToolTip="Быстро вставить любую скопированную ссылку (vless, trojan, vmess, подписку) из буфера обмена">
+                            ToolTip="Быстро вставить любую ссылку (vless, trojan, vmess, подписку) из буфера обмена">
                         <Button.Template>
                             <ControlTemplate TargetType="Button">
-                                <Border x:Name="bd" Background="#2010B981" BorderBrush="#5010B981" BorderThickness="1" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                                <Border x:Name="bd" Background="#2010E79D" BorderBrush="#5010E79D" BorderThickness="1" CornerRadius="6" Padding="{TemplateBinding Padding}">
                                     <StackPanel Orientation="Horizontal">
-                                        <ui:SymbolIcon Symbol="ClipboardPaste24" FontSize="14" Foreground="#34D399" Margin="0,0,6,0" VerticalAlignment="Center"/>
-                                        <TextBlock Text="Вставить из буфера" FontWeight="Bold" FontSize="11.5" Foreground="#34D399" VerticalAlignment="Center"/>
+                                        <ui:SymbolIcon Symbol="ClipboardPaste24" FontSize="14" Foreground="#10E79D" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                                        <TextBlock Text="Вставить из буфера" FontWeight="Bold" FontSize="11.5" Foreground="#10E79D" VerticalAlignment="Center"/>
                                     </StackPanel>
                                 </Border>
                                 <ControlTemplate.Triggers>
                                     <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter TargetName="bd" Property="Background" Value="#3010B981"/>
-                                        <Setter TargetName="bd" Property="BorderBrush" Value="#8010B981"/>
+                                        <Setter TargetName="bd" Property="Background" Value="#3010E79D"/>
+                                        <Setter TargetName="bd" Property="BorderBrush" Value="#8010E79D"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+
+                    <!-- Auto-Select Button (⚡ Автовыбор) -->
+                    <Button Grid.Column="6" Command="{Binding AutoSelectServerCommand}"
+                            Height="34" Padding="14,6" Cursor="Hand"
+                            ToolTip="Автоматически выбрать узел с наименьшим пингом">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border x:Name="bd" Background="#20FFB300" BorderBrush="#50FFB300" BorderThickness="1" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <ui:SymbolIcon Symbol="Flash24" FontSize="14" Foreground="#FFB300" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                                        <TextBlock Text="⚡ Автовыбор" FontWeight="Bold" FontSize="11.5" Foreground="#FFB300" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="bd" Property="Background" Value="#35FFB300"/>
+                                        <Setter TargetName="bd" Property="BorderBrush" Value="#80FFB300"/>
                                     </Trigger>
                                 </ControlTemplate.Triggers>
                             </ControlTemplate>
@@ -253,9 +389,9 @@
                     </Button>
                 </Grid>
 
-                <!-- Auxiliary Add Tools Row -->
+                <!-- Auxiliary Tools Row -->
                 <WrapPanel Grid.Row="1" Margin="0,8,0,0" Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock Text="Другие способы: " FontSize="10.5" Foreground="{DynamicResource TextFillColorTertiaryBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBlock Text="Другие способы: " FontSize="10.5" Foreground="#7E92B0" VerticalAlignment="Center" Margin="0,0,8,0"/>
 
                     <ui:Button Appearance="Secondary" Padding="9,4" Height="28" Margin="0,0,6,0" 
                                Command="{Binding CreateServerCommand}" ToolTip="Настроить и создать узел вручную">
@@ -293,9 +429,9 @@
         </ui:Card>
 
         <!-- ============================================== -->
-        <!-- ROW 2: Search & Filter Toolbar                 -->
+        <!-- ROW 3: Search & Filter Toolbar                 -->
         <!-- ============================================== -->
-        <ui:Card Grid.Row="2" Margin="0,0,0,10" Padding="12,8">
+        <ui:Card Grid.Row="3" Margin="0,0,0,10" Padding="12,8" Background="#DD0E1729" BorderBrush="#1E2B42">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <!-- Search Input -->
@@ -314,7 +450,7 @@
                             Text="{Binding ServerSearchQuery, UpdateSourceTrigger=PropertyChanged}"
                             FontSize="11.5" Height="32" Padding="8,4">
                     <ui:TextBox.Icon>
-                        <ui:SymbolIcon Symbol="Search24" FontSize="13" Foreground="{DynamicResource TextFillColorTertiaryBrush}"/>
+                        <ui:SymbolIcon Symbol="Search24" FontSize="13" Foreground="#7E92B0"/>
                     </ui:TextBox.Icon>
                 </ui:TextBox>
 
@@ -333,15 +469,15 @@
                                IsEnabled="{Binding IsPinging, Converter={StaticResource InverseBoolConverter}}"
                                ToolTip="Измерить пинг до всех узлов и отсортировать лучшие">
                         <StackPanel Orientation="Horizontal">
-                            <ui:SymbolIcon Symbol="Timer24" FontSize="13" Foreground="#F59E0B" Margin="0,0,5,0"/>
+                            <ui:SymbolIcon Symbol="Timer24" FontSize="13" Foreground="#FFB300" Margin="0,0,5,0"/>
                             <TextBlock Text="Пинг всех" FontSize="11.5" FontWeight="SemiBold"/>
                         </StackPanel>
                     </ui:Button>
 
                     <!-- HTTP Test Toggle -->
-                    <Border Background="#0CFFFFFF" CornerRadius="6" Padding="6,2" Margin="0,0,6,0" BorderThickness="1" BorderBrush="#14FFFFFF" VerticalAlignment="Center">
+                    <Border Background="#121A2B" CornerRadius="6" Padding="6,2" Margin="0,0,6,0" BorderThickness="1" BorderBrush="#1E2B42" VerticalAlignment="Center">
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <TextBlock Text="HTTP 204" FontSize="10.5" Foreground="{DynamicResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" Margin="2,0,4,0"/>
+                            <TextBlock Text="HTTP 204" FontSize="10.5" Foreground="#94A3B8" VerticalAlignment="Center" Margin="2,0,4,0"/>
                             <ui:ToggleSwitch IsChecked="{Binding UseHttpPing}" Margin="0" VerticalAlignment="Center" ToolTip="Проверять реальную задержку через HTTP-туннель вместо простого TCP"/>
                         </StackPanel>
                     </Border>
@@ -366,9 +502,9 @@
         </ui:Card>
 
         <!-- ============================================== -->
-        <!-- ROW 3: Server List Header & Counter            -->
+        <!-- ROW 4: Server List Header & Counter            -->
         <!-- ============================================== -->
-        <Grid Grid.Row="3" Margin="4,0,4,6">
+        <Grid Grid.Row="4" Margin="4,0,4,6">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
@@ -376,44 +512,40 @@
             </Grid.ColumnDefinitions>
 
             <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                <TextBlock Text="СПИСОК УЗЛОВ" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource TextFillColorTertiaryBrush}"/>
-                <Border Background="#1838BDF8" BorderBrush="#3038BDF8" BorderThickness="1" CornerRadius="8" Padding="7,1" Margin="8,0,0,0">
-                    <TextBlock Text="{Binding DisplayServers.Count, Mode=OneWay}" FontSize="10.5" FontWeight="Bold" Foreground="#38BDF8"/>
+                <TextBlock Text="СПИСОК УЗЛОВ" FontSize="11" FontWeight="Bold" Foreground="#7E92B0"/>
+                <Border Background="#1800F0FF" BorderBrush="#3500F0FF" BorderThickness="1" CornerRadius="8" Padding="7,1" Margin="8,0,0,0">
+                    <TextBlock Text="{Binding DisplayServers.Count, Mode=OneWay}" FontSize="10.5" FontWeight="Bold" Foreground="#00F0FF"/>
                 </Border>
             </StackPanel>
 
-            <TextBlock Grid.Column="2" Text="Клик по серверу переключает соединение" FontSize="10.5" Foreground="{DynamicResource TextFillColorTertiaryBrush}" VerticalAlignment="Center"/>
+            <TextBlock Grid.Column="2" Text="Клик по строке выбирает сервер · Кнопка ▶ подключает" FontSize="10.5" Foreground="#7E92B0" VerticalAlignment="Center"/>
         </Grid>
 
         <!-- ============================================== -->
-        <!-- ROW 4: Responsive Server Cards List            -->
+        <!-- ROW 5: Responsive Server Cards List            -->
         <!-- ============================================== -->
-        <ui:ListView Grid.Row="4" 
+        <ui:ListView Grid.Row="5"
                      ItemsSource="{Binding DisplayServers}" 
                      SelectedItem="{Binding SelectedServer}"
-                     BorderThickness="1" BorderBrush="#15FFFFFF"
-                     Background="#08000000"
-                     Padding="4">
+                     BorderThickness="1" BorderBrush="#1E2B42"
+                     Background="#05070E"
+                     Padding="4"
+                     VirtualizingStackPanel.IsVirtualizing="True"
+                     VirtualizingStackPanel.VirtualizationMode="Recycling">
             <ui:ListView.ItemTemplate>
                 <DataTemplate>
-                    <!-- Server Item Container with Quick Click Switch -->
-                    <Border CornerRadius="8" Margin="2,3" Padding="12,8" Background="#0CFFFFFF" BorderThickness="1" Cursor="Hand">
-                        <Border.InputBindings>
-                            <MouseBinding MouseAction="LeftClick" 
-                                          Command="{Binding DataContext.SelectAndConnectServerCommand, RelativeSource={RelativeSource AncestorType=ui:ListView}}"
-                                          CommandParameter="{Binding}"/>
-                        </Border.InputBindings>
-
+                    <!-- Server Item Container -->
+                    <Border CornerRadius="8" Margin="2,3" Padding="12,8" Background="#DD0E1729" BorderThickness="1">
                         <Border.Style>
                             <Style TargetType="Border">
-                                <Setter Property="BorderBrush" Value="#15FFFFFF"/>
+                                <Setter Property="BorderBrush" Value="#1E2B42"/>
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding IsCurrentlyActive}" Value="True">
-                                        <Setter Property="Background" Value="#1610B981"/>
-                                        <Setter Property="BorderBrush" Value="#6610B981"/>
+                                        <Setter Property="Background" Value="#1810E79D"/>
+                                        <Setter Property="BorderBrush" Value="#6610E79D"/>
                                     </DataTrigger>
                                     <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                                        <Setter Property="BorderBrush" Value="#4038BDF8"/>
+                                        <Setter Property="BorderBrush" Value="#6600F0FF"/>
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
@@ -432,8 +564,8 @@
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
 
-                            <!-- Protocol Badge -->
-                            <Border Grid.Column="0" Width="44" Height="36" CornerRadius="7" 
+                            <!-- Protocol Badge with Android Colors -->
+                            <Border Grid.Column="0" Width="46" Height="36" CornerRadius="7"
                                     Margin="0,0,12,0" VerticalAlignment="Center" 
                                     Background="{Binding ProtocolBadgeBackground}"
                                     BorderThickness="1" BorderBrush="{Binding ProtocolBadgeForeground}">
@@ -446,9 +578,9 @@
                             <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="13" 
-                                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" TextTrimming="CharacterEllipsis"/>
+                                               Foreground="#F1F5F9" TextTrimming="CharacterEllipsis"/>
                                     <!-- Active Pill -->
-                                    <Border Margin="8,0,0,0" Padding="6,1" CornerRadius="5" Background="#2010B981" BorderBrush="#5010B981" BorderThickness="1" VerticalAlignment="Center">
+                                    <Border Margin="8,0,0,0" Padding="6,1" CornerRadius="5" Background="#2010E79D" BorderBrush="#5010E79D" BorderThickness="1" VerticalAlignment="Center">
                                         <Border.Style>
                                             <Style TargetType="Border">
                                                 <Setter Property="Visibility" Value="Collapsed"/>
@@ -459,37 +591,37 @@
                                                 </Style.Triggers>
                                             </Style>
                                         </Border.Style>
-                                        <TextBlock Text="АКТИВЕН" FontSize="9" FontWeight="Bold" Foreground="#34D399"/>
+                                        <TextBlock Text="АКТИВЕН" FontSize="9" FontWeight="Bold" Foreground="#10E79D"/>
                                     </Border>
                                 </StackPanel>
 
                                 <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
                                     <TextBlock Text="{Binding DisplaySubtitle}" FontSize="10.5" 
-                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis"/>
-                                    <TextBlock Text="·" FontSize="10.5" Foreground="{DynamicResource TextFillColorTertiaryBrush}" Margin="5,0"/>
+                                               Foreground="#94A3B8" TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock Text="·" FontSize="10.5" Foreground="#7E92B0" Margin="5,0"/>
                                     <TextBlock Text="{Binding Network, FallbackValue='tcp'}" FontSize="10" 
-                                               FontWeight="SemiBold" Foreground="{DynamicResource TextFillColorTertiaryBrush}"/>
-                                    <TextBlock Text="·" FontSize="10.5" Foreground="{DynamicResource TextFillColorTertiaryBrush}" Margin="5,0"/>
+                                               FontWeight="SemiBold" Foreground="#7E92B0"/>
+                                    <TextBlock Text="·" FontSize="10.5" Foreground="#7E92B0" Margin="5,0"/>
                                     <TextBlock Text="{Binding SubscriptionGroup, FallbackValue='Основное'}" FontSize="10" 
-                                               Foreground="{DynamicResource TextFillColorTertiaryBrush}"/>
+                                               Foreground="#7E92B0"/>
                                 </StackPanel>
                             </StackPanel>
 
                             <!-- Ping Pill -->
-                            <Border Grid.Column="2" CornerRadius="6" Padding="8,4" VerticalAlignment="Center" Background="#12FFFFFF" BorderThickness="1" BorderBrush="#18FFFFFF">
+                            <Border Grid.Column="2" CornerRadius="6" Padding="8,4" VerticalAlignment="Center" Background="#12FFFFFF" BorderThickness="1" BorderBrush="#1E2B42">
                                 <TextBlock Text="{Binding PingDisplay}" FontSize="11" FontWeight="Bold" VerticalAlignment="Center">
                                     <TextBlock.Style>
                                         <Style TargetType="TextBlock">
-                                            <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}"/>
+                                            <Setter Property="Foreground" Value="#94A3B8"/>
                                             <Style.Triggers>
-                                                <DataTrigger Binding="{Binding PingColor}" Value="#10B981">
-                                                    <Setter Property="Foreground" Value="#34D399"/>
+                                                <DataTrigger Binding="{Binding PingColor}" Value="#10E79D">
+                                                    <Setter Property="Foreground" Value="#10E79D"/>
                                                 </DataTrigger>
-                                                <DataTrigger Binding="{Binding PingColor}" Value="#F59E0B">
-                                                    <Setter Property="Foreground" Value="#FBBF24"/>
+                                                <DataTrigger Binding="{Binding PingColor}" Value="#FFB300">
+                                                    <Setter Property="Foreground" Value="#FFB300"/>
                                                 </DataTrigger>
-                                                <DataTrigger Binding="{Binding PingColor}" Value="#EF4444">
-                                                    <Setter Property="Foreground" Value="#F87171"/>
+                                                <DataTrigger Binding="{Binding PingColor}" Value="#FF3366">
+                                                    <Setter Property="Foreground" Value="#FF3366"/>
                                                 </DataTrigger>
                                             </Style.Triggers>
                                         </Style>
@@ -499,18 +631,25 @@
 
                             <!-- Node Quick Action Buttons -->
                             <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
+                                <!-- Connect / Switch button -->
+                                <Button Style="{StaticResource MiniActionButton}" Margin="0,0,5,0"
+                                        Command="{Binding DataContext.SelectAndConnectServerCommand, RelativeSource={RelativeSource AncestorType=ui:ListView}}"
+                                        CommandParameter="{Binding}" ToolTip="Подключиться к этому серверу">
+                                    <ui:SymbolIcon Symbol="Play24" FontSize="13" Foreground="#10E79D"/>
+                                </Button>
+
                                 <!-- Ping single node -->
                                 <Button Style="{StaticResource MiniActionButton}" Margin="0,0,4,0"
                                         Command="{Binding DataContext.PingSingleServerCommand, RelativeSource={RelativeSource AncestorType=ui:ListView}}"
                                         CommandParameter="{Binding}" ToolTip="Измерить пинг этого сервера">
-                                    <ui:SymbolIcon Symbol="Flash24" FontSize="12" Foreground="#F59E0B"/>
+                                    <ui:SymbolIcon Symbol="Flash24" FontSize="12" Foreground="#FFB300"/>
                                 </Button>
 
                                 <!-- Edit node -->
                                 <Button Style="{StaticResource MiniActionButton}" Margin="0,0,4,0"
                                         Command="{Binding DataContext.EditServerCommand, RelativeSource={RelativeSource AncestorType=ui:ListView}}"
                                         CommandParameter="{Binding}" ToolTip="Редактировать параметры сервера">
-                                    <ui:SymbolIcon Symbol="Edit24" FontSize="12" Foreground="#38BDF8"/>
+                                    <ui:SymbolIcon Symbol="Edit24" FontSize="12" Foreground="#00F0FF"/>
                                 </Button>
 
                                 <!-- Copy link -->
@@ -520,18 +659,11 @@
                                     <ui:SymbolIcon Symbol="Copy24" FontSize="12" Foreground="#A78BFA"/>
                                 </Button>
 
-                                <!-- Connect / Switch button -->
-                                <Button Style="{StaticResource MiniActionButton}" Margin="0,0,4,0"
-                                        Command="{Binding DataContext.SelectAndConnectServerCommand, RelativeSource={RelativeSource AncestorType=ui:ListView}}"
-                                        CommandParameter="{Binding}" ToolTip="Подключиться к этому серверу">
-                                    <ui:SymbolIcon Symbol="Play24" FontSize="12" Foreground="#10B981"/>
-                                </Button>
-
                                 <!-- Delete node -->
                                 <Button Style="{StaticResource MiniActionButton}"
                                         Command="{Binding DataContext.DeleteServerCommand, RelativeSource={RelativeSource AncestorType=ui:ListView}}"
                                         CommandParameter="{Binding}" ToolTip="Удалить сервер из списка">
-                                    <ui:SymbolIcon Symbol="Delete24" FontSize="12" Foreground="#F87171"/>
+                                    <ui:SymbolIcon Symbol="Delete24" FontSize="12" Foreground="#FF3366"/>
                                 </Button>
                             </StackPanel>
                         </Grid>

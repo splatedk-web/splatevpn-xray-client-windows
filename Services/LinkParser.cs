@@ -18,16 +18,34 @@ public static class LinkParser
     public static bool IsSubscriptionUrl(string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return false;
-        var trimmed = text.Trim();
+        var trimmed = UnwrapImportLink(text);
         return (trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
                 trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) &&
                Uri.TryCreate(trimmed, UriKind.Absolute, out var uri) &&
                (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
     }
 
+    public static string UnwrapImportLink(string text)
+    {
+        var value = text.Trim();
+        foreach (var prefix in new[] { "happ://add/", "incy://import/", "incy://add/" })
+            if (value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                value = value[prefix.Length..].Trim();
+                if (Regex.IsMatch(value, @"^https?%3a%2f%2f", RegexOptions.IgnoreCase)) value = Uri.UnescapeDataString(value);
+                break;
+            }
+        return value;
+    }
+
+    public static bool SameEndpoint(ServerNode a, ServerNode b) =>
+        a.Protocol.Equals(b.Protocol, StringComparison.OrdinalIgnoreCase) && a.Address.Equals(b.Address, StringComparison.OrdinalIgnoreCase) &&
+        a.Port == b.Port && a.Uuid == b.Uuid && a.Encryption == b.Encryption && a.Network == b.Network && a.Security == b.Security &&
+        a.Sni == b.Sni && a.PublicKey == b.PublicKey && a.ShortId == b.ShortId && a.Path == b.Path && a.Host == b.Host && a.Flow == b.Flow;
+
     public static ServerNode? Parse(string rawLink, string subGroup = "Основное")
     {
-        var trimmed = rawLink.Trim();
+        var trimmed = rawLink.Trim().Replace(@"\u0026", "&").Replace("&amp;", "&");
         try
         {
             if (trimmed.StartsWith("vless://", StringComparison.OrdinalIgnoreCase))
@@ -53,6 +71,7 @@ public static class LinkParser
 
         var decodedText = TryDecodeBase64(text);
 
+        // 1. Direct line-by-line protocol link parsing
         var lines = decodedText.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
         foreach (var line in lines)
         {
@@ -66,6 +85,7 @@ public static class LinkParser
             }
         }
 
+        // 2. Regex fallback for protocol links within raw or decoded text
         if (result.Count == 0)
         {
             var matches = ProtocolLinkRegex.Matches(decodedText);
@@ -92,95 +112,48 @@ public static class LinkParser
             }
         }
 
+        // 3. Clash / Mihomo YAML Support (proxies:)
+        if (result.Count == 0)
+        {
+            var yamlNodes = ParseClashYaml(decodedText, subGroup);
+            if (yamlNodes.Count == 0 && decodedText != text)
+            {
+                yamlNodes = ParseClashYaml(text, subGroup);
+            }
+            if (yamlNodes.Count > 0)
+            {
+                result.AddRange(yamlNodes);
+            }
+        }
+
+        // 4. Sing-box / Xray JSON Support (outbounds: [ ... ])
+        if (result.Count == 0)
+        {
+            var jsonNodes = ParseSingboxJson(decodedText, subGroup);
+            if (jsonNodes.Count == 0 && decodedText != text)
+            {
+                jsonNodes = ParseSingboxJson(text, subGroup);
+            }
+            if (jsonNodes.Count > 0)
+            {
+                result.AddRange(jsonNodes);
+            }
+        }
+
         return result;
     }
 
-    public static string GenerateLink(ServerNode node)
+    public static string GenerateLink(ServerNode node) => ServerShare.Link(node, preserveRaw: false);
+
+    public static string TryDecodeBase64(string input)
     {
-        if (node == null) return string.Empty;
-
-        var encName = Uri.EscapeDataString(node.Name.Trim());
-
-        switch (node.Protocol.ToLowerInvariant())
-        {
-            case "vless":
-            {
-                var sb = new StringBuilder();
-                sb.Append($"vless://{node.Uuid}@{node.Address}:{node.Port}?");
-                sb.Append($"type={Uri.EscapeDataString(node.Network)}");
-                sb.Append($"&security={Uri.EscapeDataString(node.Security)}");
-                if (!string.IsNullOrEmpty(node.Flow)) sb.Append($"&flow={Uri.EscapeDataString(node.Flow)}");
-                if (!string.IsNullOrEmpty(node.Sni)) sb.Append($"&sni={Uri.EscapeDataString(node.Sni)}");
-                if (!string.IsNullOrEmpty(node.Fingerprint)) sb.Append($"&fp={Uri.EscapeDataString(node.Fingerprint)}");
-                if (!string.IsNullOrEmpty(node.PublicKey)) sb.Append($"&pbk={Uri.EscapeDataString(node.PublicKey)}");
-                if (!string.IsNullOrEmpty(node.ShortId)) sb.Append($"&sid={Uri.EscapeDataString(node.ShortId)}");
-                if (!string.IsNullOrEmpty(node.SpiderX)) sb.Append($"&spx={Uri.EscapeDataString(node.SpiderX)}");
-                if (!string.IsNullOrEmpty(node.Path) && node.Path != "/") sb.Append($"&path={Uri.EscapeDataString(node.Path)}");
-                if (!string.IsNullOrEmpty(node.Host)) sb.Append($"&host={Uri.EscapeDataString(node.Host)}");
-                if (!string.IsNullOrEmpty(node.Mode) && node.Mode != "auto") sb.Append($"&mode={Uri.EscapeDataString(node.Mode)}");
-                if (!string.IsNullOrEmpty(node.Padding)) sb.Append($"&xPaddingBytes={Uri.EscapeDataString(node.Padding)}");
-                if (!string.IsNullOrEmpty(encName)) sb.Append($"#{encName}");
-                return sb.ToString();
-            }
-
-            case "trojan":
-            {
-                var sb = new StringBuilder();
-                sb.Append($"trojan://{node.Uuid}@{node.Address}:{node.Port}?");
-                sb.Append($"type={Uri.EscapeDataString(node.Network)}");
-                sb.Append($"&security={Uri.EscapeDataString(node.Security)}");
-                if (!string.IsNullOrEmpty(node.Sni)) sb.Append($"&sni={Uri.EscapeDataString(node.Sni)}");
-                if (!string.IsNullOrEmpty(node.Fingerprint)) sb.Append($"&fp={Uri.EscapeDataString(node.Fingerprint)}");
-                if (!string.IsNullOrEmpty(node.PublicKey)) sb.Append($"&pbk={Uri.EscapeDataString(node.PublicKey)}");
-                if (!string.IsNullOrEmpty(node.ShortId)) sb.Append($"&sid={Uri.EscapeDataString(node.ShortId)}");
-                if (!string.IsNullOrEmpty(node.Path) && node.Path != "/") sb.Append($"&path={Uri.EscapeDataString(node.Path)}");
-                if (!string.IsNullOrEmpty(node.Host)) sb.Append($"&host={Uri.EscapeDataString(node.Host)}");
-                if (!string.IsNullOrEmpty(encName)) sb.Append($"#{encName}");
-                return sb.ToString();
-            }
-
-            case "vmess":
-            {
-                var vmessObj = new Dictionary<string, object>
-                {
-                    ["v"] = "2",
-                    ["ps"] = node.Name,
-                    ["add"] = node.Address,
-                    ["port"] = node.Port,
-                    ["id"] = node.Uuid,
-                    ["aid"] = 0,
-                    ["scy"] = string.IsNullOrEmpty(node.Encryption) ? "auto" : node.Encryption,
-                    ["net"] = node.Network,
-                    ["type"] = "none",
-                    ["host"] = node.Host,
-                    ["path"] = node.Path,
-                    ["tls"] = node.Security.Equals("tls", StringComparison.OrdinalIgnoreCase) ? "tls" : "none",
-                    ["sni"] = node.Sni
-                };
-                var json = JsonSerializer.Serialize(vmessObj);
-                var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
-                return $"vmess://{b64}";
-            }
-
-            case "ss" or "shadowsocks":
-            {
-                var userinfo = $"{node.Encryption}:{node.Uuid}";
-                var b64Userinfo = Convert.ToBase64String(Encoding.UTF8.GetBytes(userinfo));
-                return $"ss://{b64Userinfo}@{node.Address}:{node.Port}#{encName}";
-            }
-
-            default:
-                return node.RawLink;
-        }
-    }
-
-    private static string TryDecodeBase64(string input)
-    {
-        var trimmed = input.Trim().Replace("\r", "").Replace("\n", "").Replace(" ", "");
+        var trimmed = input.Trim().Trim('\uFEFF', '\u200B').Replace("\r", "").Replace("\n", "").Replace(" ", "");
         if (trimmed.StartsWith("vless://", StringComparison.OrdinalIgnoreCase) ||
             trimmed.StartsWith("vmess://", StringComparison.OrdinalIgnoreCase) ||
             trimmed.StartsWith("trojan://", StringComparison.OrdinalIgnoreCase) ||
-            trimmed.StartsWith("ss://", StringComparison.OrdinalIgnoreCase))
+            trimmed.StartsWith("ss://", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("proxies:", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("{\"outbounds\"", StringComparison.OrdinalIgnoreCase))
         {
             return input;
         }
@@ -195,7 +168,11 @@ public static class LinkParser
             }
             var bytes = Convert.FromBase64String(cleaned);
             var decoded = Encoding.UTF8.GetString(bytes);
-            if (decoded.Contains("://"))
+            if (decoded.Contains("://") ||
+                decoded.Contains("proxies:") ||
+                decoded.Contains("outbounds") ||
+                decoded.Contains("\"protocol\"") ||
+                decoded.Contains("\"server\""))
             {
                 return decoded;
             }
@@ -212,19 +189,20 @@ public static class LinkParser
         var host = uri.Host ?? "";
         var port = uri.Port > 0 ? uri.Port : 443;
         var name = !string.IsNullOrEmpty(uri.Fragment)
-            ? SafeUrlDecode(uri.Fragment)
+            ? CleanNodeName(uri.Fragment)
             : $"{host}:{port}";
 
         var query = uri.QueryParams;
         query.TryGetValue("flow", out var flow);
         query.TryGetValue("encryption", out var encryption);
-        
+
         var rawNet = uri.GetFirstQueryParam("type", "net", "transport");
         var network = NormalizeNetwork(rawNet);
 
         var pbk = uri.GetFirstQueryParam("pbk", "publicKey") ?? "";
         var sid = uri.GetFirstQueryParam("sid", "shortId") ?? "";
         var spx = uri.GetFirstQueryParam("spx", "spiderX") ?? "";
+        var pqv = uri.GetFirstQueryParam("pqv", "postQuantum", "mldsa65Verify") ?? "";
 
         var rawSec = uri.GetFirstQueryParam("security", "sec");
         var security = !string.IsNullOrEmpty(rawSec)
@@ -233,6 +211,9 @@ public static class LinkParser
 
         var sni = uri.GetFirstQueryParam("sni", "peer", "serverName") ?? host;
         var fp = uri.GetFirstQueryParam("fp", "fingerprint") ?? "chrome";
+
+        var certName = uri.GetFirstQueryParam("verifyPeerCertByName", "certName", "peerCertName");
+        var pinSha = uri.GetFirstQueryParam("pinnedPeerCertSha256", "pinSha256", "pin");
 
         var pathParam = uri.GetFirstQueryParam("path", "serviceName");
         var finalPath = !string.IsNullOrEmpty(pathParam)
@@ -244,7 +225,12 @@ public static class LinkParser
         var padding = uri.GetFirstQueryParam("xPaddingBytes", "x_padding_bytes", "padding") ?? "100-1000";
         var alpn = uri.GetFirstQueryParam("alpn") ?? "";
 
-        // Check 3x-ui extra json
+        var xmuxConnStr = uri.GetFirstQueryParam("xmuxMaxConnections", "maxConnections", "xmux");
+        int? xmuxMaxConn = int.TryParse(xmuxConnStr, out var parsedXmux) ? parsedXmux : null;
+        var xmuxReqTimes = uri.GetFirstQueryParam("xmuxMaxRequestTimes", "hMaxRequestTimes");
+        var xmuxReusableSecs = uri.GetFirstQueryParam("xmuxMaxReusableSecs", "hMaxReusableSecs");
+
+        // Check 3x-ui / modern extra json
         if (query.TryGetValue("extra", out var extraStr) && !string.IsNullOrEmpty(extraStr))
         {
             try
@@ -253,6 +239,7 @@ public static class LinkParser
                 using var doc = JsonDocument.Parse(decodedExtra);
                 if (doc.RootElement.TryGetProperty("mode", out var m)) mode = m.GetString() ?? mode;
                 if (doc.RootElement.TryGetProperty("xPaddingBytes", out var p)) padding = p.GetString() ?? padding;
+                if (doc.RootElement.TryGetProperty("pqv", out var pq)) pqv = pq.GetString() ?? pqv;
             }
             catch { }
         }
@@ -274,6 +261,12 @@ public static class LinkParser
             PublicKey = pbk,
             ShortId = sid,
             SpiderX = spx,
+            Mldsa65Verify = pqv,
+            VerifyPeerCertByName = certName,
+            PinnedPeerCertSha256 = pinSha,
+            XmuxMaxConnections = xmuxMaxConn,
+            XmuxMaxRequestTimes = xmuxReqTimes,
+            XmuxMaxReusableSecs = xmuxReusableSecs,
             Path = finalPath,
             Host = httpHost,
             Mode = mode,
@@ -291,7 +284,7 @@ public static class LinkParser
         var host = uri.Host ?? "";
         var port = uri.Port > 0 ? uri.Port : 443;
         var name = !string.IsNullOrEmpty(uri.Fragment)
-            ? SafeUrlDecode(uri.Fragment)
+            ? CleanNodeName(uri.Fragment)
             : $"Trojan-{host}";
 
         var rawNet = uri.GetFirstQueryParam("type", "net", "transport");
@@ -300,6 +293,7 @@ public static class LinkParser
         var pbk = uri.GetFirstQueryParam("pbk", "publicKey") ?? "";
         var sid = uri.GetFirstQueryParam("sid", "shortId") ?? "";
         var spx = uri.GetFirstQueryParam("spx", "spiderX") ?? "";
+        var pqv = uri.GetFirstQueryParam("pqv", "postQuantum", "mldsa65Verify") ?? "";
 
         var rawSec = uri.GetFirstQueryParam("security", "sec");
         var security = !string.IsNullOrEmpty(rawSec)
@@ -308,6 +302,9 @@ public static class LinkParser
 
         var sni = uri.GetFirstQueryParam("sni", "peer", "serverName") ?? host;
         var fp = uri.GetFirstQueryParam("fp", "fingerprint") ?? "chrome";
+
+        var certName = uri.GetFirstQueryParam("verifyPeerCertByName", "certName", "peerCertName");
+        var pinSha = uri.GetFirstQueryParam("pinnedPeerCertSha256", "pinSha256", "pin");
 
         var pathParam = uri.GetFirstQueryParam("path", "serviceName");
         var finalPath = !string.IsNullOrEmpty(pathParam)
@@ -332,6 +329,9 @@ public static class LinkParser
             PublicKey = pbk,
             ShortId = sid,
             SpiderX = spx,
+            Mldsa65Verify = pqv,
+            VerifyPeerCertByName = certName,
+            PinnedPeerCertSha256 = pinSha,
             Path = finalPath,
             Host = httpHost,
             Alpn = alpn,
@@ -342,7 +342,7 @@ public static class LinkParser
 
     private static ServerNode? ParseVmess(string raw, string subGroup)
     {
-        var fragment = raw.Contains('#') ? SafeUrlDecode(raw.Substring(raw.IndexOf('#') + 1)) : null;
+        var fragment = raw.Contains('#') ? CleanNodeName(raw.Substring(raw.IndexOf('#') + 1)) : null;
         var base64Part = raw.Substring(8);
         if (base64Part.Contains('#')) base64Part = base64Part.Substring(0, base64Part.IndexOf('#'));
         if (base64Part.Contains('?')) base64Part = base64Part.Substring(0, base64Part.IndexOf('?'));
@@ -377,6 +377,7 @@ public static class LinkParser
         var path = rawPath.StartsWith('/') ? rawPath : "/" + rawPath;
         var scy = root.TryGetProperty("scy", out var scyEl) ? scyEl.GetString() ?? "auto" : "auto";
         var fp = root.TryGetProperty("fp", out var fpEl) ? fpEl.GetString() ?? "chrome" : "chrome";
+        var alpn = root.TryGetProperty("alpn", out var alpnEl) ? alpnEl.GetString() ?? "" : "";
 
         return new ServerNode
         {
@@ -392,6 +393,7 @@ public static class LinkParser
             Sni = sni ?? host,
             Host = httpHost,
             Fingerprint = fp,
+            Alpn = alpn,
             Path = path,
             RawLink = raw,
             SubscriptionGroup = subGroup
@@ -404,7 +406,7 @@ public static class LinkParser
         string? fragment = null;
         if (withoutScheme.Contains('#'))
         {
-            fragment = SafeUrlDecode(withoutScheme.Substring(withoutScheme.IndexOf('#') + 1));
+            fragment = CleanNodeName(withoutScheme.Substring(withoutScheme.IndexOf('#') + 1));
             withoutScheme = withoutScheme.Substring(0, withoutScheme.IndexOf('#'));
         }
 
@@ -468,6 +470,348 @@ public static class LinkParser
         };
     }
 
+    // ============================================================
+    // Clash / Mihomo YAML Parser
+    // ============================================================
+
+    public static List<ServerNode> ParseClashYaml(string yamlText, string subGroup = "Основное")
+    {
+        var result = new List<ServerNode>();
+        if (string.IsNullOrWhiteSpace(yamlText)) return result;
+
+        var lines = yamlText.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+        bool inProxies = false;
+        var currentBlock = new List<string>();
+
+        foreach (var line in lines)
+        {
+            var trimmed = line.Trim();
+            if (trimmed.StartsWith("proxies:", StringComparison.OrdinalIgnoreCase))
+            {
+                inProxies = true;
+                continue;
+            }
+            if (inProxies && (trimmed.StartsWith("proxy-groups:", StringComparison.OrdinalIgnoreCase) ||
+                              trimmed.StartsWith("rules:", StringComparison.OrdinalIgnoreCase) ||
+                              trimmed.StartsWith("rule-providers:", StringComparison.OrdinalIgnoreCase)))
+            {
+                if (currentBlock.Count > 0)
+                {
+                    var node = ParseClashProxyBlock(currentBlock, subGroup);
+                    if (node != null) result.Add(node);
+                    currentBlock.Clear();
+                }
+                break;
+            }
+
+            if (inProxies)
+            {
+                if (line.StartsWith("  - ") || line.StartsWith("- "))
+                {
+                    if (currentBlock.Count > 0)
+                    {
+                        var node = ParseClashProxyBlock(currentBlock, subGroup);
+                        if (node != null) result.Add(node);
+                        currentBlock.Clear();
+                    }
+                    currentBlock.Add(line);
+                }
+                else if (currentBlock.Count > 0)
+                {
+                    currentBlock.Add(line);
+                }
+            }
+        }
+
+        if (currentBlock.Count > 0)
+        {
+            var node = ParseClashProxyBlock(currentBlock, subGroup);
+            if (node != null) result.Add(node);
+        }
+
+        return result;
+    }
+
+    private static ServerNode? ParseClashProxyBlock(List<string> lines, string subGroup)
+    {
+        var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        string currentParent = "";
+
+        foreach (var rawLine in lines)
+        {
+            var line = rawLine;
+            if (line.StartsWith("  - ")) line = line.Substring(4);
+            else if (line.StartsWith("- ")) line = line.Substring(2);
+
+            var indent = rawLine.Length - rawLine.TrimStart().Length;
+            var trimmed = line.Trim();
+            if (string.IsNullOrEmpty(trimmed) || trimmed.StartsWith('#')) continue;
+
+            var colonIdx = trimmed.IndexOf(':');
+            if (colonIdx > 0)
+            {
+                var key = trimmed.Substring(0, colonIdx).Trim().Trim('\'', '\"');
+                var val = trimmed.Substring(colonIdx + 1).Trim().Trim('\'', '\"');
+
+                if (string.IsNullOrEmpty(val) && (key.EndsWith("-opts") || key == "headers"))
+                {
+                    currentParent = key;
+                }
+                else
+                {
+                    var fullKey = indent > 4 && !string.IsNullOrEmpty(currentParent)
+                        ? $"{currentParent}.{key}"
+                        : key;
+                    dict[fullKey] = val;
+                }
+            }
+        }
+
+        dict.TryGetValue("type", out var type);
+        dict.TryGetValue("server", out var server);
+        dict.TryGetValue("port", out var portStr);
+        dict.TryGetValue("name", out var name);
+
+        if (string.IsNullOrEmpty(type) || string.IsNullOrEmpty(server) || !int.TryParse(portStr, out var port))
+            return null;
+
+        name = !string.IsNullOrEmpty(name) ? CleanNodeName(name) : $"{server}:{port}";
+        type = type.ToLowerInvariant();
+
+        dict.TryGetValue("uuid", out var uuid);
+        if (string.IsNullOrEmpty(uuid)) dict.TryGetValue("password", out uuid);
+
+        dict.TryGetValue("network", out var net);
+        var network = NormalizeNetwork(net);
+
+        dict.TryGetValue("tls", out var tlsStr);
+        bool isTls = bool.TryParse(tlsStr, out var b) && b;
+
+        dict.TryGetValue("servername", out var sni);
+        if (string.IsNullOrEmpty(sni)) dict.TryGetValue("sni", out sni);
+
+        dict.TryGetValue("flow", out var flow);
+        dict.TryGetValue("client-fingerprint", out var fp);
+        if (string.IsNullOrEmpty(fp)) dict.TryGetValue("fingerprint", out fp);
+
+        dict.TryGetValue("reality-opts.public-key", out var pbk);
+        dict.TryGetValue("reality-opts.short-id", out var sid);
+        dict.TryGetValue("reality-opts.spider-x", out var spx);
+        dict.TryGetValue("reality-opts.pqv", out var pqv);
+        if (string.IsNullOrEmpty(pqv)) dict.TryGetValue("reality-opts.mldsa65-verify", out pqv);
+
+        var security = "none";
+        if (!string.IsNullOrEmpty(pbk)) security = "reality";
+        else if (isTls) security = "tls";
+
+        dict.TryGetValue("ws-opts.path", out var wsPath);
+        dict.TryGetValue("grpc-opts.grpc-service-name", out var grpcName);
+        dict.TryGetValue("xhttp-opts.path", out var xhttpPath);
+        var finalPath = !string.IsNullOrEmpty(xhttpPath) ? xhttpPath : (!string.IsNullOrEmpty(wsPath) ? wsPath : (!string.IsNullOrEmpty(grpcName) ? grpcName : "/"));
+
+        dict.TryGetValue("ws-opts.headers.Host", out var wsHost);
+        dict.TryGetValue("xhttp-opts.headers.Host", out var xhttpHost);
+        var httpHost = !string.IsNullOrEmpty(xhttpHost) ? xhttpHost : (!string.IsNullOrEmpty(wsHost) ? wsHost : "");
+
+        dict.TryGetValue("xhttp-opts.mode", out var xhttpMode);
+        dict.TryGetValue("cipher", out var cipher);
+
+        var node = new ServerNode
+        {
+            Id = Guid.NewGuid().ToString(),
+            Name = name,
+            Protocol = type switch
+            {
+                "vless" => "vless",
+                "vmess" => "vmess",
+                "trojan" => "trojan",
+                "ss" => "shadowsocks",
+                _ => type
+            },
+            Address = server,
+            Port = port,
+            Uuid = uuid ?? "",
+            Network = network,
+            Security = security,
+            Sni = sni ?? server,
+            Flow = flow ?? "",
+            Fingerprint = !string.IsNullOrEmpty(fp) ? fp : "chrome",
+            PublicKey = pbk ?? "",
+            ShortId = sid ?? "",
+            SpiderX = spx ?? "",
+            Mldsa65Verify = pqv ?? "",
+            Path = finalPath,
+            Host = httpHost,
+            Mode = !string.IsNullOrEmpty(xhttpMode) ? xhttpMode : "auto",
+            Encryption = !string.IsNullOrEmpty(cipher) ? cipher : "none",
+            SubscriptionGroup = subGroup
+        };
+
+        node.RawLink = GenerateLink(node);
+        return node;
+    }
+
+    // ============================================================
+    // Sing-box / Xray JSON Parser
+    // ============================================================
+
+    public static List<ServerNode> ParseSingboxJson(string jsonText, string subGroup = "Основное")
+    {
+        var result = new List<ServerNode>();
+        if (string.IsNullOrWhiteSpace(jsonText)) return result;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(jsonText);
+            JsonElement outboundsEl;
+
+            if (doc.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                outboundsEl = doc.RootElement;
+            }
+            else if (doc.RootElement.TryGetProperty("outbounds", out var outProp) && outProp.ValueKind == JsonValueKind.Array)
+            {
+                outboundsEl = outProp;
+            }
+            else
+            {
+                return result;
+            }
+
+            foreach (var el in outboundsEl.EnumerateArray())
+            {
+                var node = ParseSingleJsonOutbound(el, subGroup);
+                if (node != null) result.Add(node);
+            }
+        }
+        catch { }
+
+        return result;
+    }
+
+    private static ServerNode? ParseSingleJsonOutbound(JsonElement el, string subGroup)
+    {
+        try
+        {
+            string? type = null;
+            if (el.TryGetProperty("type", out var t)) type = t.GetString();
+            else if (el.TryGetProperty("protocol", out var p)) type = p.GetString();
+
+            if (string.IsNullOrEmpty(type)) return null;
+            type = type.ToLowerInvariant();
+
+            if (type != "vless" && type != "vmess" && type != "trojan" && type != "shadowsocks" && type != "ss")
+                return null;
+
+            string? tag = null;
+            if (el.TryGetProperty("tag", out var tg)) tag = tg.GetString();
+            else if (el.TryGetProperty("name", out var nm)) tag = nm.GetString();
+
+            string? server = null;
+            if (el.TryGetProperty("server", out var srv)) server = srv.GetString();
+            else if (el.TryGetProperty("address", out var addr)) server = addr.GetString();
+
+            int port = 443;
+            if (el.TryGetProperty("server_port", out var sp)) port = sp.GetInt32();
+            else if (el.TryGetProperty("port", out var pt))
+            {
+                if (pt.ValueKind == JsonValueKind.Number) port = pt.GetInt32();
+                else if (pt.ValueKind == JsonValueKind.String && int.TryParse(pt.GetString(), out var parsedPt)) port = parsedPt;
+            }
+
+            if (string.IsNullOrEmpty(server)) return null;
+
+            string uuid = "";
+            string flow = "";
+            if (el.TryGetProperty("uuid", out var uid)) uuid = uid.GetString() ?? "";
+            else if (el.TryGetProperty("password", out var pwd)) uuid = pwd.GetString() ?? "";
+
+            if (el.TryGetProperty("flow", out var fl)) flow = fl.GetString() ?? "";
+
+            // TLS / Reality
+            string security = "none";
+            string sni = server;
+            string pbk = "";
+            string sid = "";
+            string fp = "chrome";
+            string pqv = "";
+
+            if (el.TryGetProperty("tls", out var tlsEl))
+            {
+                bool enabled = true;
+                if (tlsEl.TryGetProperty("enabled", out var en)) enabled = en.GetBoolean();
+                if (enabled) security = "tls";
+
+                if (tlsEl.TryGetProperty("server_name", out var sn)) sni = sn.GetString() ?? sni;
+                else if (tlsEl.TryGetProperty("sni", out var sn2)) sni = sn2.GetString() ?? sni;
+
+                if (tlsEl.TryGetProperty("utls", out var utlsEl) && utlsEl.TryGetProperty("fingerprint", out var fpEl))
+                {
+                    fp = fpEl.GetString() ?? fp;
+                }
+
+                if (tlsEl.TryGetProperty("reality", out var rEl))
+                {
+                    bool rEnabled = true;
+                    if (rEl.TryGetProperty("enabled", out var ren)) rEnabled = ren.GetBoolean();
+                    if (rEnabled)
+                    {
+                        security = "reality";
+                        if (rEl.TryGetProperty("public_key", out var pk)) pbk = pk.GetString() ?? "";
+                        if (rEl.TryGetProperty("short_id", out var si)) sid = si.GetString() ?? "";
+                        if (rEl.TryGetProperty("pqv", out var pq)) pqv = pq.GetString() ?? "";
+                    }
+                }
+            }
+
+            // Transport
+            string network = "tcp";
+            string path = "/";
+            string host = "";
+            string mode = "auto";
+
+            if (el.TryGetProperty("transport", out var trEl))
+            {
+                if (trEl.TryGetProperty("type", out var trType))
+                    network = NormalizeNetwork(trType.GetString());
+
+                if (trEl.TryGetProperty("path", out var pth)) path = pth.GetString() ?? path;
+                if (trEl.TryGetProperty("headers", out var hdrs) && hdrs.TryGetProperty("Host", out var hst))
+                    host = hst.GetString() ?? host;
+                if (trEl.TryGetProperty("mode", out var md)) mode = md.GetString() ?? mode;
+            }
+
+            var node = new ServerNode
+            {
+                Id = Guid.NewGuid().ToString(),
+                Name = !string.IsNullOrEmpty(tag) ? CleanNodeName(tag) : $"{server}:{port}",
+                Protocol = type == "ss" ? "shadowsocks" : type,
+                Address = server,
+                Port = port,
+                Uuid = uuid,
+                Network = network,
+                Security = security,
+                Sni = sni,
+                Flow = flow,
+                Fingerprint = fp,
+                PublicKey = pbk,
+                ShortId = sid,
+                Mldsa65Verify = pqv,
+                Path = path,
+                Host = host,
+                Mode = mode,
+                SubscriptionGroup = subGroup
+            };
+
+            node.RawLink = GenerateLink(node);
+            return node;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static void ParseHostPort(string hostPort, out string host, out int port)
     {
         host = "";
@@ -529,6 +873,17 @@ public static class LinkParser
         }
     }
 
+    private static string CleanNodeName(string raw)
+    {
+        var decoded = SafeUrlDecode(raw.Replace('+', ' ')).Trim();
+        // Remove trailing anti-censorship / TSPU padding comment hashes if present
+        if (decoded.Contains("# anti-tspu-salt"))
+        {
+            decoded = decoded.Replace("# anti-tspu-salt", "").Trim();
+        }
+        return decoded;
+    }
+
     internal class ParsedUri
     {
         public string Scheme { get; } = "";
@@ -541,6 +896,7 @@ public static class LinkParser
 
         public ParsedUri(string raw)
         {
+            raw = raw.Replace(@"\u0026", "&").Replace("&amp;", "&");
             var hashIdx = raw.IndexOf('#');
             string withoutFrag;
             if (hashIdx >= 0)
@@ -558,7 +914,7 @@ public static class LinkParser
             string beforeQuery;
             if (qIdx >= 0)
             {
-                var qStr = withoutFrag.Substring(qIdx + 1);
+                var qStr = withoutFrag.Substring(qIdx + 1).Replace(@"\u0026", "&").Replace("&amp;", "&");
                 var pairs = qStr.Split('&', StringSplitOptions.RemoveEmptyEntries);
                 foreach (var pair in pairs)
                 {
@@ -606,7 +962,7 @@ public static class LinkParser
             string hostPort;
             if (atIdx >= 0)
             {
-                UserInfo = authority.Substring(0, atIdx);
+                UserInfo = Uri.UnescapeDataString(authority.Substring(0, atIdx));
                 hostPort = authority.Substring(atIdx + 1);
             }
             else

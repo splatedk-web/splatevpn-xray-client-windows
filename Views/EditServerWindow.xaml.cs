@@ -15,8 +15,8 @@ public partial class EditServerWindow
     public EditServerWindow(ServerNode? server = null)
     {
         InitializeComponent();
-        Server = server != null 
-            ? server.Clone() 
+        Server = server != null
+            ? server.Clone()
             : new ServerNode { Name = "Новый сервер", Protocol = "vless", Port = 443, Security = "reality", Network = "tcp" };
         PopulateFields();
     }
@@ -27,6 +27,8 @@ public partial class EditServerWindow
         TxtAddress.Text = Server.Address;
         TxtPort.Text = Server.Port.ToString();
         TxtUuid.Text = Server.Uuid;
+        TxtEncryption.Text = Server.Encryption;
+        TxtAlpn.Text = Server.Alpn;
         TxtSni.Text = Server.Sni;
         TxtPublicKey.Text = Server.PublicKey;
         TxtShortId.Text = Server.ShortId;
@@ -131,6 +133,13 @@ public partial class EditServerWindow
         Server.Network = GetSelectedTag(CmbNetwork, "tcp");
         Server.Security = GetSelectedTag(CmbSecurity, "reality");
         Server.Uuid = TxtUuid.Text.Trim();
+        Server.Encryption = TxtEncryption.Text.Trim();
+        Server.Alpn = TxtAlpn.Text.Trim();
+        if (string.IsNullOrWhiteSpace(Server.Uuid) || (Server.Protocol == "shadowsocks" && (string.IsNullOrWhiteSpace(Server.Encryption) || Server.Encryption == "none")))
+        {
+            MessageBox.Show("Укажите UUID/пароль и метод шифрования для Shadowsocks.", "Проверьте конфигурацию", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
         Server.Sni = TxtSni.Text.Trim();
         Server.Fingerprint = GetSelectedTag(CmbFingerprint, "chrome");
         Server.PublicKey = TxtPublicKey.Text.Trim();

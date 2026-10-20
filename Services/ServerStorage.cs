@@ -13,9 +13,9 @@ public class ServerStorage : IServerStorage
     private readonly string _serversFile;
     private readonly string _settingsFile;
 
-    public ServerStorage()
+    public ServerStorage(string? storageDirectory = null)
     {
-        _storageDir = Path.Combine(
+        _storageDir = storageDirectory ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "SplateVPN"
         );
@@ -26,62 +26,128 @@ public class ServerStorage : IServerStorage
     }
 
     private readonly string _subscriptionsFile;
+    public string? LastLoadWarning { get; private set; }
 
     public List<ServerNode> LoadServers()
     {
+        lock (_ioLock) return LoadServersCore();
+    }
+
+    private List<ServerNode> LoadServersCore()
+    {
+        LastLoadWarning = null;
         try
         {
             if (File.Exists(_serversFile))
             {
                 var json = File.ReadAllText(_serversFile);
-                var list = JsonSerializer.Deserialize<List<ServerNode>>(json);
+                using var document = JsonDocument.Parse(json);
+                if (document.RootElement.ValueKind != JsonValueKind.Array)
+                    throw new InvalidDataException("Каталог серверов должен содержать массив.");
+                var list = new List<ServerNode>();
+                var skipped = 0;
+                foreach (var element in document.RootElement.EnumerateArray())
+                {
+                    try
+                    {
+                        var node = element.Deserialize<ServerNode>();
+                        if (node == null)
+                        { skipped++; continue; }
+                        node.Encryption ??= "none";
+                        list.Add(node);
+                    }
+                    catch (Exception ex) when (ex is JsonException or InvalidOperationException or ArgumentException)
+                    { skipped++; }
+                }
+                if (skipped > 0) LastLoadWarning = $"Пропущено повреждённых записей серверов: {skipped}. Исходный файл сохранён.";
                 if (list != null && list.Count > 0)
                 {
                     bool updated = false;
                     foreach (var node in list)
                     {
-                        if (!string.IsNullOrEmpty(node.RawLink) && 
-                            (string.IsNullOrEmpty(node.Mldsa65Verify) || node.XmuxMaxConnections == null))
+                        if (!string.IsNullOrEmpty(node.RawLink) &&
+                            (string.IsNullOrEmpty(node.Mldsa65Verify) ||
+                             node.XmuxMaxConnections == null ||
+                             node.Encryption.Contains(@"\u0026") ||
+                             node.Encryption.Contains("extra=") ||
+                             (node.Alpn != null && node.Alpn.Contains(@"\u0026")) ||
+                             node.RawLink.Contains(@"\u0026")))
                         {
-                            var parsed = LinkParser.Parse(node.RawLink);
+                            var parsed = LinkParser.Parse(node.RawLink, node.SubscriptionGroup);
                             if (parsed != null)
                             {
-                                if (!string.IsNullOrEmpty(parsed.Mldsa65Verify) && string.IsNullOrEmpty(node.Mldsa65Verify))
-                                {
-                                    node.Mldsa65Verify = parsed.Mldsa65Verify;
-                                    updated = true;
-                                }
-                                if (parsed.XmuxMaxConnections != null && node.XmuxMaxConnections == null)
-                                {
-                                    node.XmuxMaxConnections = parsed.XmuxMaxConnections;
-                                    node.XmuxMaxRequestTimes = parsed.XmuxMaxRequestTimes;
-                                    node.XmuxMaxReusableSecs = parsed.XmuxMaxReusableSecs;
-                                    updated = true;
-                                }
+                                node.Network = parsed.Network;
+                                node.Security = parsed.Security;
+                                node.Encryption = parsed.Encryption;
+                                node.PublicKey = parsed.PublicKey;
+                                node.ShortId = parsed.ShortId;
+                                node.SpiderX = parsed.SpiderX;
+                                node.Sni = parsed.Sni;
+                                node.Fingerprint = parsed.Fingerprint;
+                                node.Mldsa65Verify = parsed.Mldsa65Verify;
+                                node.Path = parsed.Path;
+                                node.Host = parsed.Host;
+                                node.Mode = parsed.Mode;
+                                node.Padding = parsed.Padding;
+                                node.Alpn = parsed.Alpn;
+                                node.Flow = parsed.Flow;
+                                node.XmuxMaxConnections = parsed.XmuxMaxConnections;
+                                node.XmuxMaxRequestTimes = parsed.XmuxMaxRequestTimes;
+                                node.XmuxMaxReusableSecs = parsed.XmuxMaxReusableSecs;
+                                node.RawLink = node.RawLink.Replace(@"\u0026", "&").Replace("&amp;", "&");
+                                updated = true;
                             }
                         }
                     }
-                    if (updated)
+                    if (updated && skipped == 0)
                     {
-                        SaveServers(list);
+                        try { SaveServers(list); }
+                        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                        { LastLoadWarning = "Серверы загружены, но миграцию не удалось сохранить: " + ex.Message; }
                     }
                     return list;
                 }
             }
         }
-        catch { }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
+        {
+            LastLoadWarning = "Не удалось прочитать каталог серверов: " + ex.Message;
+            throw new InvalidDataException(LastLoadWarning, ex);
+        }
 
         return new List<ServerNode>();
     }
 
+    private readonly object _ioLock = new();
+    public void SaveBackup(List<ServerNode> servers, List<SubscriptionItem> subscriptions, AppSettings settings)
+    {
+        lock (_ioLock)
+            AtomicFileSet.Write(new Dictionary<string, byte[]>
+            {
+                [_serversFile] = JsonSerializer.SerializeToUtf8Bytes(servers),
+                [_subscriptionsFile] = JsonSerializer.SerializeToUtf8Bytes(subscriptions),
+                [_settingsFile] = JsonSerializer.SerializeToUtf8Bytes(settings)
+            });
+    }
+    public void SaveCatalog(List<ServerNode> servers, List<SubscriptionItem> subscriptions)
+    {
+        lock (_ioLock) IServerStorage.SaveCatalogWithRollback(this, servers, subscriptions);
+    }
+
     public void SaveServers(List<ServerNode> servers)
     {
-        try
+        lock (_ioLock)
         {
             var json = JsonSerializer.Serialize(servers, new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(_serversFile, json);
+            var temp = _serversFile + ".tmp";
+            File.WriteAllText(temp, json);
+            File.Move(temp, _serversFile, overwrite: true);
         }
-        catch { }
+    }
+
+    public Task SaveServersAsync(List<ServerNode> servers)
+    {
+        return Task.Run(() => SaveServers(servers));
     }
 
     public List<SubscriptionItem> LoadSubscriptions()
@@ -130,36 +196,50 @@ public class ServerStorage : IServerStorage
 
     public void SaveSubscriptions(List<SubscriptionItem> subscriptions)
     {
-        try
+        lock (_ioLock)
         {
             var json = JsonSerializer.Serialize(subscriptions, new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(_subscriptionsFile, json);
+            var temp = _subscriptionsFile + ".tmp";
+            File.WriteAllText(temp, json);
+            File.Move(temp, _subscriptionsFile, overwrite: true);
         }
-        catch { }
     }
 
     public AppSettings LoadSettings()
     {
-        try
+        lock (_ioLock)
         {
-            if (File.Exists(_settingsFile))
+            try
             {
-                var json = File.ReadAllText(_settingsFile);
-                var s = JsonSerializer.Deserialize<AppSettings>(json);
-                if (s != null) return s;
+                if (File.Exists(_settingsFile))
+                {
+                    var json = File.ReadAllText(_settingsFile);
+                    var s = JsonSerializer.Deserialize<AppSettings>(json);
+                    if (s != null)
+                    {
+                        if (SettingsCompatibility.Normalize(s))
+                        {
+                            var backup = Path.Combine(_storageDir, "settings.before-2.9.1.json");
+                            if (!File.Exists(backup)) File.Copy(_settingsFile, backup);
+                            SaveSettings(s);
+                        }
+                        return s;
+                    }
+                }
             }
+            catch { }
+            return new AppSettings { EnableAiDns = true };
         }
-        catch { }
-        return new AppSettings();
     }
 
     public void SaveSettings(AppSettings settings)
     {
-        try
+        lock (_ioLock)
         {
             var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(_settingsFile, json);
+            var temp = _settingsFile + ".tmp";
+            File.WriteAllText(temp, json);
+            File.Move(temp, _settingsFile, overwrite: true);
         }
-        catch { }
     }
 }

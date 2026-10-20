@@ -5,12 +5,12 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <UseWPF>true</UseWPF>
+    <UseWPF>true</UseWPF><DefaultItemExcludes>$(DefaultItemExcludes);.port-backup/**;tests/**</DefaultItemExcludes>
     <ApplicationTitle>SplateVPN Desktop</ApplicationTitle>
     <AssemblyName>SplateClient</AssemblyName>
-    <Version>2.7.0</Version>
-    <AssemblyVersion>2.7.0</AssemblyVersion>
-    <FileVersion>2.7.0</FileVersion>
+    <Version>2.12.5</Version>
+    <AssemblyVersion>2.12.5</AssemblyVersion>
+    <FileVersion>2.12.5</FileVersion>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
   </PropertyGroup>
 
@@ -24,13 +24,43 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </None>
+    <None Update="wwwroot\**">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
+    <Content Include="runtime\WebView2\**\*">
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
     <PackageReference Include="WPF-UI" Version="4.3.0" />
     <PackageReference Include="ZXing.Net" Version="0.16.11" />
   </ItemGroup>
+
+  <Target Name="CopyCoreFilesAfterBuild" AfterTargets="Build">
+    <ItemGroup>
+      <CoreFiles Include="$(MSBuildProjectDirectory)\core\**\*.*" />
+      <WwwrootFiles Include="$(MSBuildProjectDirectory)\wwwroot\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(CoreFiles)" DestinationFolder="$(TargetDir)\core\%(RecursiveDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(WwwrootFiles)" DestinationFolder="$(TargetDir)\wwwroot\%(RecursiveDir)" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyCoreFilesAfterPublish" AfterTargets="Publish">
+    <ItemGroup>
+      <CoreFilesToPublish Include="$(MSBuildProjectDirectory)\core\**\*.*" />
+      <AssetFilesToPublish Include="$(MSBuildProjectDirectory)\Assets\**\*.*" />
+      <WwwrootFilesToPublish Include="$(MSBuildProjectDirectory)\wwwroot\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(CoreFilesToPublish)" DestinationFolder="$(PublishDir)\core\%(RecursiveDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(AssetFilesToPublish)" DestinationFolder="$(PublishDir)\Assets\%(RecursiveDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(WwwrootFilesToPublish)" DestinationFolder="$(PublishDir)\wwwroot\%(RecursiveDir)" SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>

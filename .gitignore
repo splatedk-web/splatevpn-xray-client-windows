@@ -1,0 +1,42 @@
+# Build output
+bin/
+obj/
+publish/
+publish2/
+dist/
+
+# Xray core binaries (users download separately)
+core/
+
+# Runtime logs
+*.log
+
+# IDE / user-specific
+.vs/
+*.user
+*.suo
+
+# OS files
+Thumbs.db
+Desktop.ini
+
+# Temporary scripts
+*.ps1
+!/build_installer.ps1
+
+# Distribution folders and locally supplied runtimes
+/.port-backup/
+/installer_build/
+/installer_output/
+/release-v*/
+/release_portable/
+/runtime/
+/dependencies/
+/tests/artifacts/
+/tests/sandbox-*/
+/tests/SandboxChecks/Package/
+node_modules/
+*.spcfg
+*.db
+*.jks
+*.keystore

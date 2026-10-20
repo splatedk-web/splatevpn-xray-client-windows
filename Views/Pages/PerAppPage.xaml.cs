@@ -39,9 +39,16 @@ public partial class PerAppPage : Page
     private void LoadFromViewModel()
     {
         if (_viewModel == null) return;
+        var isProxy = _viewModel.Settings.SplitTunnelingMode != "bypass_selected";
+        PopulateAppsList(isProxy);
+    }
 
-        _isProxyMode = _viewModel.Settings.SplitTunnelingMode != "bypass_selected";
+    private void PopulateAppsList(bool isProxyMode)
+    {
+        _isProxyMode = isProxyMode;
         UpdateModeUi();
+
+        if (_viewModel == null) return;
 
         var source = _isProxyMode ? _viewModel.PerAppProxyList : _viewModel.PerAppDirectList;
         _currentApps.Clear();
@@ -112,21 +119,21 @@ public partial class PerAppPage : Page
 
     private void ProxyMode_Click(object sender, RoutedEventArgs e)
     {
-        if (!_isProxyMode)
+        if (!_isProxyMode && _viewModel != null)
         {
-            _isProxyMode = true;
-            UpdateModeUi();
-            LoadFromViewModel();
+            _viewModel.Settings.SplitTunnelingMode = "proxy_selected";
+            _viewModel.SaveSettingsCommand.Execute(null);
+            PopulateAppsList(isProxyMode: true);
         }
     }
 
     private void BypassMode_Click(object sender, RoutedEventArgs e)
     {
-        if (_isProxyMode)
+        if (_isProxyMode && _viewModel != null)
         {
-            _isProxyMode = false;
-            UpdateModeUi();
-            LoadFromViewModel();
+            _viewModel.Settings.SplitTunnelingMode = "bypass_selected";
+            _viewModel.SaveSettingsCommand.Execute(null);
+            PopulateAppsList(isProxyMode: false);
         }
     }
 

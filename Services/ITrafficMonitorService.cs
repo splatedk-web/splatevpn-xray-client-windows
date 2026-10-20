@@ -12,7 +12,8 @@ public interface ITrafficMonitorService
     // Event raised when session bytes are updated (totalDownloaded, totalUploaded)
     event Action<long, long>? SessionBytesUpdated;
     // Starts monitoring (should be called when connection is established)
-    void Start();
+    void Start(int metricsPort);
+    void Resume(int metricsPort) => Start(metricsPort);
     // Stops monitoring (when disconnected)
     void Stop();
 }

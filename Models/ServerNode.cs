@@ -6,6 +6,8 @@ namespace SplateClientDesktop.Models;
 
 public class ServerNode : INotifyPropertyChanged
 {
+    private bool _isFavorite;
+    public bool IsFavorite { get => _isFavorite; set => SetField(ref _isFavorite, value); }
     private string _id = Guid.NewGuid().ToString();
     private string _name = "";
     private string _protocol = "vless"; // vless, trojan, vmess, ss
@@ -37,7 +39,14 @@ public class ServerNode : INotifyPropertyChanged
     private bool _isSelected = false;
     private bool _isCurrentlyActive = false;
     private bool _isTestingPing = false;
+    private bool _isCustom = false;
     private string _subscriptionGroup = "Основное";
+
+    public bool IsCustom
+    {
+        get => _isCustom;
+        set => SetField(ref _isCustom, value);
+    }
 
     public string Id
     {
@@ -281,12 +290,14 @@ public class ServerNode : INotifyPropertyChanged
         set => SetField(ref _isSelected, value);
     }
 
+    [System.Text.Json.Serialization.JsonIgnore]
     public bool IsCurrentlyActive
     {
         get => _isCurrentlyActive;
         set => SetField(ref _isCurrentlyActive, value);
     }
 
+    [System.Text.Json.Serialization.JsonIgnore]
     public bool IsTestingPing
     {
         get => _isTestingPing;
@@ -309,27 +320,54 @@ public class ServerNode : INotifyPropertyChanged
 
     // UI Helpers
     public string DisplayName => !string.IsNullOrWhiteSpace(Name) ? Name : $"{Address}:{Port}";
-    public string DisplaySubtitle => $"{Protocol.ToUpperInvariant()} · {Network.ToUpperInvariant()} · {Security.ToUpperInvariant()}";
+    public string DisplaySubtitle => $"{Protocol.ToUpperInvariant()} · {Network.ToUpperInvariant()} · {(string.IsNullOrWhiteSpace(Security) || Security.Equals("none", StringComparison.OrdinalIgnoreCase) ? "DIRECT" : Security.ToUpperInvariant())}";
     public string ProtocolUpper => Protocol.ToUpperInvariant();
-    public string PingDisplay => Ping > 0 ? $"{Ping} ms" : "--";
-    public string PingColor => Ping <= 0 ? "#6B7280" : Ping < 150 ? "#10B981" : Ping < 300 ? "#F59E0B" : "#EF4444";
+    public string PingDisplay => Ping > 0 ? $"{Ping} ms" : "—";
+    public string PingColor => Ping <= 0 ? "#64748B" : Ping < 150 ? "#10E79D" : Ping < 300 ? "#FFB300" : "#FF3366";
+
+    public string Flag
+    {
+        get
+        {
+            var text = DisplayName.ToUpperInvariant();
+            if (text.Contains("RU") || text.Contains("RUSSIA") || text.Contains("РОССИЯ")) return "🇷🇺";
+            if (text.Contains("NL") || text.Contains("NETHERLANDS") || text.Contains("НИДЕРЛАНДЫ") || text.Contains("AMSTERDAM")) return "🇳🇱";
+            if (text.Contains("DE") || text.Contains("GERMANY") || text.Contains("ГЕРМАНИЯ") || text.Contains("FRANKFURT")) return "🇩🇪";
+            if (text.Contains("US") || text.Contains("USA") || text.Contains("США") || text.Contains("AMERICA")) return "🇺🇸";
+            if (text.Contains("FI") || text.Contains("FINLAND") || text.Contains("ФИНЛЯНДИЯ")) return "🇫🇮";
+            if (text.Contains("SE") || text.Contains("SWEDEN") || text.Contains("ШВЕЦИЯ")) return "🇸🇪";
+            if (text.Contains("TR") || text.Contains("TURKEY") || text.Contains("ТУРЦИЯ")) return "🇹🇷";
+            if (text.Contains("KZ") || text.Contains("KAZAKHSTAN") || text.Contains("КАЗАХСТАН")) return "🇰🇿";
+            if (text.Contains("FR") || text.Contains("FRANCE") || text.Contains("ФРАНЦИЯ")) return "🇫🇷";
+            if (text.Contains("GB") || text.Contains("UK") || text.Contains("LONDON")) return "🇬🇧";
+            if (text.Contains("JP") || text.Contains("JAPAN") || text.Contains("ЯПОНИЯ")) return "🇯🇵";
+            if (text.Contains("SG") || text.Contains("SINGAPORE") || text.Contains("СИНГАПУР")) return "🇸🇬";
+            if (text.Contains("PL") || text.Contains("POLAND") || text.Contains("ПОЛЬША")) return "🇵🇱";
+            if (text.Contains("AE") || text.Contains("DUBAI") || text.Contains("ДУБАЙ")) return "🇦🇪";
+            if (text.Contains("CH") || text.Contains("SWISS") || text.Contains("ШВЕЙЦАРИЯ")) return "🇨🇭";
+            if (text.Contains("AT") || text.Contains("AUSTRIA") || text.Contains("АВСТРИЯ")) return "🇦🇹";
+            return "🌐";
+        }
+    }
 
     public string ProtocolBadgeBackground => Protocol.ToLowerInvariant() switch
     {
-        "vless" => Security.Equals("reality", StringComparison.OrdinalIgnoreCase) ? "#2010B981" : "#2006B6D4",
-        "vmess" => "#203B82F6",
-        "trojan" => "#208B5CF6",
-        "ss" or "shadowsocks" => "#20F59E0B",
-        _ => "#206B7280"
+        "vless" => "#22A78BFA",
+        "vmess" => "#2200E5FF",
+        "trojan" => "#2210E79D",
+        "ss" or "shadowsocks" => "#22FFB300",
+        "hysteria" or "hysteria2" or "hy2" => "#22FF3366",
+        _ => "#2200F0FF"
     };
 
     public string ProtocolBadgeForeground => Protocol.ToLowerInvariant() switch
     {
-        "vless" => Security.Equals("reality", StringComparison.OrdinalIgnoreCase) ? "#34D399" : "#22D3EE",
-        "vmess" => "#60A5FA",
-        "trojan" => "#A78BFA",
-        "ss" or "shadowsocks" => "#FBBF24",
-        _ => "#9CA3AF"
+        "vless" => "#A78BFA",
+        "vmess" => "#00E5FF",
+        "trojan" => "#10E79D",
+        "ss" or "shadowsocks" => "#FFB300",
+        "hysteria" or "hysteria2" or "hy2" => "#FF3366",
+        _ => "#00F0FF"
     };
 
     public ServerNode Clone()

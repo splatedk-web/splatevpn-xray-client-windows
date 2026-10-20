@@ -374,7 +374,7 @@
                             </StackPanel>
 
                             <TextBlock Text="SplateVPN Desktop (Windows)" FontSize="13.5" FontWeight="Bold" Margin="0,0,0,2"/>
-                            <TextBlock Text="Версия 2.7.0 · Xray Core 26.9.9 · Wintun Tun2socks" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,10"/>
+                            <TextBlock Text="Версия 2.8.0 · Xray Core 26.9.9 · Wintun Tun2socks" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,10"/>
 
                             <ui:Button Appearance="Secondary" HorizontalAlignment="Stretch" Height="32" Command="{Binding OpenUrlCommand}" CommandParameter="https://github.com/splatedk-web/splatevpn-xray-client-windows">
                                 <StackPanel Orientation="Horizontal">
