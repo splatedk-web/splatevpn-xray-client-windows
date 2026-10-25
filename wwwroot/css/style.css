@@ -2020,7 +2020,8 @@ body { background:radial-gradient(ellipse at 12% 0%,color-mix(in srgb,var(--ambi
 .share-qr { display:block; margin:20px auto; width:min(300px,100%); height:auto; border-radius:16px; }
 .tactical-input { max-width:100%; min-width:100px; padding:10px; border:1px solid var(--border-medium); background:var(--surface-elevated); color:var(--text-primary); border-radius:10px; }
 #lanEndpoints { white-space:pre-line; user-select:text; }
-#tab-routing .settings-grid { grid-template-columns:1fr; }
+#tab-routing .settings-grid { grid-template-columns:minmax(0,1fr); }
+#routingContent > .settings-section { grid-column:1 / -1; }
 #tab-routing .settings-container { max-width:880px; margin:auto; }
 .server-tabs-bar { flex-wrap:wrap; gap:4px; }
 @media(max-width:960px){

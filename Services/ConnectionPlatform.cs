@@ -10,6 +10,10 @@ public interface IConnectionPlatform
     void StopTun(Action<string> log);
     void EnableProxy(int httpPort, int socksPort);
     void DisableProxy();
+    ProxyPreflight InspectProxyForTun();
+    ProxyPreflight ReadProxyStatus();
+    void SuspendProxyForTun(ProxyPreflight approved);
+    void CheckEnvironment(Models.AppSettings settings, IReadOnlyCollection<int> ownedPorts);
 }
 
 public sealed class WindowsConnectionPlatform : IConnectionPlatform
@@ -23,6 +27,10 @@ public sealed class WindowsConnectionPlatform : IConnectionPlatform
     public void StopTun(Action<string> log) => _tun.StopTun(log);
     public void EnableProxy(int httpPort, int socksPort) => SystemProxyManager.EnableProxy(httpPort, socksPort);
     public void DisableProxy() => SystemProxyManager.DisableProxy();
+    public ProxyPreflight InspectProxyForTun() => SystemProxyManager.InspectForTun();
+    public ProxyPreflight ReadProxyStatus() => SystemProxyManager.ReadStatus();
+    public void SuspendProxyForTun(ProxyPreflight approved) => SystemProxyManager.SuspendForTun(approved);
+    public void CheckEnvironment(Models.AppSettings settings, IReadOnlyCollection<int> ownedPorts) => ConnectionPreflight.Check(AppContext.BaseDirectory, settings, ownedPorts);
 }
 
 public interface IConnectionProbes
@@ -37,13 +45,16 @@ public interface IConnectionProbes
     }
     Task<long> CurrentAsync(int httpPort, int timeoutMs, CancellationToken token);
     Task CandidatesAsync(IReadOnlyList<Models.ServerNode> nodes, Action<Models.ServerNode, long> result, CancellationToken token);
+    Task CandidatesAsync(IReadOnlyList<Models.ServerNode> nodes, Action<Models.ServerNode, long> result, CancellationToken token, int maxConcurrency) => CandidatesAsync(nodes, result, token);
     bool NetworkAvailable { get; }
 }
 
-public sealed class ConnectionProbes : IConnectionProbes
+public sealed class ConnectionProbes(Func<Models.AppSettings>? settings = null) : IConnectionProbes
 {
     public bool NetworkAvailable => System.Net.NetworkInformation.NetworkInterface.GetIsNetworkAvailable();
     public Task<long> CurrentAsync(int port, int budget, CancellationToken token) => PingService.MeasureHttpProxyLatencyAsync(port, budget, token);
+    public Task CandidatesAsync(IReadOnlyList<Models.ServerNode> nodes, Action<Models.ServerNode, long> result, CancellationToken token, int maxConcurrency) =>
+        PingService.MeasureRealPingBatchAsync(nodes, System.IO.Path.Combine(AppContext.BaseDirectory, "core", "xray.exe"), timeoutMs: 3000, onSingleNodePinged: result, ct: token, upstream: settings == null ? null : UpstreamProxy.FromSettings(settings()), maxBatchSize: maxConcurrency);
     public Task CandidatesAsync(IReadOnlyList<Models.ServerNode> nodes, Action<Models.ServerNode, long> result, CancellationToken token) =>
-        PingService.MeasureRealPingBatchAsync(nodes, System.IO.Path.Combine(AppContext.BaseDirectory, "core", "xray.exe"), timeoutMs: 3000, onSingleNodePinged: result, ct: token);
+        PingService.MeasureRealPingBatchAsync(nodes, System.IO.Path.Combine(AppContext.BaseDirectory, "core", "xray.exe"), timeoutMs: 3000, onSingleNodePinged: result, ct: token, upstream: settings == null ? null : UpstreamProxy.FromSettings(settings()));
 }

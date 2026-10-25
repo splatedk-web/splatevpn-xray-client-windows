@@ -1,0 +1,42 @@
+const {chromium}=require('C:/Users/Daniel/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const path=require('node:path'),assert=require('node:assert/strict'),fs=require('node:fs');
+(async()=>{
+ const browser=await chromium.launch({headless:true,channel:'msedge'});
+ try{
+  const page=await browser.newPage({viewport:{width:1280,height:860},reducedMotion:'reduce'}),errors=[];
+  page.on('pageerror',e=>errors.push(e.message));
+  await page.addInitScript(()=>{window.__sent=[];window.chrome={webview:{postMessage:m=>__sent.push(m),addEventListener:(_,fn)=>window.__host=fn}};});
+  await page.goto('file:///'+path.resolve('wwwroot/index.html').replaceAll('\\','/'));
+  const host=payload=>page.evaluate(payload=>__host({data:{type:'appUpdate',payload}}),payload);
+  const available={currentVersion:'2.10.0',latestVersion:'2.11.4',available:true,checking:false,status:'Доступна новая версия: 2.11.4'};
+  await host(available);
+  assert(await page.locator('#appUpdateBanner').isVisible());
+  assert((await page.locator('#appUpdateHeadline').innerText()).includes('2.11.4'));
+  await page.locator('#btnAppUpdateRelease').click();
+  assert.equal((await page.evaluate(()=>__sent.at(-1))).action,'openAppRelease');
+  await page.locator('#navSettings').click();
+  assert.equal(await page.locator('#appCurrentVersion').innerText(),'2.10.0');
+  await page.locator('#btnCheckAppUpdates').click();
+  assert.equal((await page.evaluate(()=>__sent.at(-1))).action,'checkAppUpdates');
+  await host({...available,checking:true,status:'Проверка обновлений…'});
+  assert(await page.locator('#btnCheckAppUpdates').isDisabled());
+  await host({...available,status:'Не удалось связаться с GitHub.'});
+  assert(!(await page.locator('#btnCheckAppUpdates').isDisabled()));
+  assert((await page.locator('#appUpdateStatus').innerText()).includes('Не удалось'));
+  assert.equal(await page.locator('#appUpdateBanner').getAttribute('hidden'),null,'known available release retained on error');
+  await host({currentVersion:'2.11.4',latestVersion:'2.11.4',available:false,checking:false,status:'Обновлений нет.'});
+  assert(await page.locator('#appUpdateBanner').isHidden());
+  assert(await page.locator('#btnSettingsAppRelease').isHidden());
+  assert.equal(await page.locator('#appCurrentVersion').innerText(),'2.11.4');
+  await host({...available,latestVersion:'<img src=x onerror=alert(1)>'});
+  assert.equal(await page.locator('#appUpdateHeadline img').count(),0,'release metadata rendered as text');
+  await host(available);await page.locator('#navHome').click();
+  await page.locator('#mainViewport').evaluate(e=>e.scrollTop=0);
+  fs.mkdirSync('tests/artifacts/2.11.5',{recursive:true});
+  await page.screenshot({path:'tests/artifacts/2.11.5/update-available.png'});
+  await page.setViewportSize({width:820,height:600});
+  assert(!await page.locator('#tab-home').evaluate(e=>e.scrollWidth>e.clientWidth+2));
+  assert.deepEqual(errors,[]);
+  console.log('PASS update banner, manual check, GitHub action, checking state, error/no-update distinction, safe text and responsive layout');
+ }finally{await browser.close();}
+})().catch(e=>{console.error(e);process.exitCode=1;});

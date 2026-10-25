@@ -6,7 +6,25 @@ public static class SettingsCompatibility
 {
     public static bool Normalize(AppSettings settings)
     {
+        LanSharing.Validate(settings);
         var changed = false;
+        if (settings.TemporaryRoutes == null) { settings.TemporaryRoutes = new(); changed = true; }
+        if (settings.TemporaryRoutes.Count > 100 || settings.TemporaryRoutes.Any(r => r == null || r.Route is not ("proxy" or "direct" or "block") || SiteRules.Domain(r.Domain) != r.Domain))
+            throw new ArgumentException("Повреждены временные правила сайтов.");
+        changed |= settings.TemporaryRoutes.RemoveAll(r => r.ExpiresAt <= DateTimeOffset.UtcNow) > 0;
+        if (!RoutingRegions.IsValid(settings.RoutingRegion)) { settings.RoutingRegion = "ru"; changed = true; }
+        if (settings.UpstreamProxyEnabled)
+        {
+            var proxy = UpstreamProxy.Validate(settings.UpstreamProxyHost, settings.UpstreamProxyPort);
+            if (proxy.Host != settings.UpstreamProxyHost) { settings.UpstreamProxyHost = proxy.Host; changed = true; }
+            if (settings.RoutingMode != "global") { settings.RoutingMode = "global"; changed = true; }
+        }
+        settings.SubscriptionUpdateHistory ??= new();
+        changed |= settings.SubscriptionUpdateHistory.RemoveAll(r => r == null) > 0;
+        if (settings.SubscriptionUpdateHistory.Count > 100) { settings.SubscriptionUpdateHistory = settings.SubscriptionUpdateHistory.TakeLast(100).ToList(); changed = true; }
+        if (settings.ConnectionProfiles == null) { settings.ConnectionProfiles = new(); changed = true; }
+        if (settings.ConnectionProfiles.Count > 8 || settings.ConnectionProfiles.Any(p => p == null || string.IsNullOrWhiteSpace(p.Id) || p.Name == null || p.Name.Trim().Length is < 1 or > 48 || p.Snapshot == null || p.Snapshot.Length > 256_000 || p.NetworkKey?.Length > 256 || p.NetworkLabel?.Length > 256) || settings.ConnectionProfiles.Select(p => p.Id).Distinct().Count() != settings.ConnectionProfiles.Count)
+            throw new ArgumentException("Повреждён список профилей подключения.");
         if (settings.SettingsSchemaVersion < 2)
         {
             // Preserve the effective old route while removing the obsolete Xbox endpoint.
@@ -15,13 +33,14 @@ public static class SettingsCompatibility
             settings.SettingsSchemaVersion = 2;
             changed = true;
         }
-        if (settings.AiRoutingMode is not ("off" or "vpn" or "dns_ai")) { settings.AiRoutingMode = "vpn"; changed = true; }
-        var aiFlags = (settings.EnableAiBypass, settings.EnableAiDns, settings.EnableAiXboxDns, settings.EnableSniffing);
+        if (settings.AiRoutingMode is not ("off" or "vpn" or "dns_ai" or "dns_vpn")) { settings.AiRoutingMode = "vpn"; changed = true; }
+        if (settings.RoutingMode == "global" && settings.AiRoutingMode is not ("vpn" or "dns_vpn"))
+        { settings.AiRoutingMode = "vpn"; changed = true; }
+        var aiFlags = (settings.EnableAiBypass, settings.EnableAiDns, settings.EnableAiXboxDns);
         settings.EnableAiBypass = settings.AiRoutingMode != "off";
-        settings.EnableAiDns = settings.AiRoutingMode == "dns_ai";
+        settings.EnableAiDns = settings.AiRoutingMode is "dns_ai" or "dns_vpn";
         settings.EnableAiXboxDns = false;
-        if (settings.EnableAiBypass) settings.EnableSniffing = true;
-        changed |= aiFlags != (settings.EnableAiBypass, settings.EnableAiDns, settings.EnableAiXboxDns, settings.EnableSniffing);
+        changed |= aiFlags != (settings.EnableAiBypass, settings.EnableAiDns, settings.EnableAiXboxDns);
         if (settings.DnsProvider == "xbox") { settings.DnsProvider = "cloudflare"; changed = true; }
         if (SmartDnsProviders.Find(settings.AiDnsProvider) == null) { settings.AiDnsProvider = "dns_ai"; changed = true; }
         try { var doh = XrayConfigGenerator.ValidateDoh(settings.CustomDohUrl); if (settings.CustomDohUrl != doh) { settings.CustomDohUrl = doh; changed = true; } } catch (ArgumentException) { settings.CustomDohUrl = "https://dns.google/dns-query"; changed = true; }

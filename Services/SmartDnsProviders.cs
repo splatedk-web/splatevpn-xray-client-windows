@@ -19,7 +19,7 @@ public static class SmartDnsProviders
         new("zapret_dns", "Zapret DNS", "dns.zapret.moe", ["83.217.211.149"]),
         new("comss_smart", "Comss.one", "dns.comss.one", ["195.133.25.16", "83.220.169.155", "212.109.195.93"])
     ];
-    public static SmartDnsProvider? Find(string key) => All.FirstOrDefault(p => p.Key == key.ToLowerInvariant());
+    public static SmartDnsProvider? Find(string key) => All.FirstOrDefault(p => p.Key == key?.ToLowerInvariant());
     public static SmartDnsProvider ForAi(string key) => Find(key) ?? All[0];
     public static string ProbeConfig(string key, bool fragment, int port, string? uplink = null)
     {

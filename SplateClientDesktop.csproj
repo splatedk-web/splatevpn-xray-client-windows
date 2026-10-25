@@ -8,9 +8,9 @@
     <UseWPF>true</UseWPF><DefaultItemExcludes>$(DefaultItemExcludes);.port-backup/**;tests/**</DefaultItemExcludes>
     <ApplicationTitle>SplateVPN Desktop</ApplicationTitle>
     <AssemblyName>SplateClient</AssemblyName>
-    <Version>2.12.5</Version>
-    <AssemblyVersion>2.12.5</AssemblyVersion>
-    <FileVersion>2.12.5</FileVersion>
+    <Version>2.14.0</Version>
+    <AssemblyVersion>2.14.0</AssemblyVersion>
+    <FileVersion>2.14.0</FileVersion>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
   </PropertyGroup>
 

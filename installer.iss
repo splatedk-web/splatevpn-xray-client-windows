@@ -3,7 +3,7 @@
 ; Build: ISCC.exe installer.iss
 
 #define MyAppName "SplateVPN Desktop"
-#define MyAppVersion "2.12.5"
+#define MyAppVersion "2.14.0"
 #define MyAppPublisher "Splate"
 #define MyAppURL "https://github.com/splatedk-web"
 #define MyAppExeName "SplateClient.exe"

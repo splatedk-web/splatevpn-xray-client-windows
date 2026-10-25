@@ -73,12 +73,12 @@ public static class IpLocationService
         return (false, -1);
     }
 
-    public static async Task<IpDetails> FetchEgressIpAsync(int socksPort = 10808, int timeoutMs = 5000)
+    public static async Task<IpDetails> FetchEgressIpAsync(int socksPort = 10808, int timeoutMs = 5000, CancellationToken cancellationToken = default)
     {
         // 1. Try ipwho.is
         try
         {
-            var res = await QueryJsonAsync("https://ipwho.is/", socksPort, timeoutMs);
+            var res = await QueryJsonAsync("https://ipwho.is/", socksPort, timeoutMs, cancellationToken);
             if (!string.IsNullOrEmpty(res))
             {
                 using var doc = JsonDocument.Parse(res);
@@ -104,12 +104,13 @@ public static class IpLocationService
                 }
             }
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch { }
 
         // 2. Try api.ip.sb
         try
         {
-            var res = await QueryJsonAsync("https://api.ip.sb/geoip", socksPort, timeoutMs);
+            var res = await QueryJsonAsync("https://api.ip.sb/geoip", socksPort, timeoutMs, cancellationToken);
             if (!string.IsNullOrEmpty(res))
             {
                 using var doc = JsonDocument.Parse(res);
@@ -125,12 +126,13 @@ public static class IpLocationService
                 }
             }
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch { }
 
         // 3. Try ipinfo.io
         try
         {
-            var res = await QueryJsonAsync("https://ipinfo.io/json", socksPort, timeoutMs);
+            var res = await QueryJsonAsync("https://ipinfo.io/json", socksPort, timeoutMs, cancellationToken);
             if (!string.IsNullOrEmpty(res))
             {
                 using var doc = JsonDocument.Parse(res);
@@ -145,12 +147,13 @@ public static class IpLocationService
                 }
             }
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch { }
 
         return new IpDetails("Не определен", "Неизвестно", "", "", "🌐", false);
     }
 
-    private static async Task<string?> QueryJsonAsync(string url, int socksPort, int timeoutMs)
+    private static async Task<string?> QueryJsonAsync(string url, int socksPort, int timeoutMs, CancellationToken cancellationToken)
     {
         using var handler = new SocketsHttpHandler
         {
@@ -174,11 +177,12 @@ public static class IpLocationService
         client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
         client.DefaultRequestHeaders.Accept.ParseAdd("application/json");
 
-        using var cts = new CancellationTokenSource(timeoutMs);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(timeoutMs);
         using var response = await client.GetAsync(url, cts.Token).ConfigureAwait(false);
         if (response.IsSuccessStatusCode)
         {
-            return await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+            return await response.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
         }
         return null;
     }

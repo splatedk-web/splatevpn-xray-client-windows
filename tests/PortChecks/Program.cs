@@ -7,6 +7,28 @@ using System.Text.Json.Nodes;
 using SplateClientDesktop.Services;
 using SplateClientDesktop.Models;
 
+if (args is ["--desktop-refresh-only"]) { await DesktopRefreshChecks.RunAsync(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../"))); return; }
+
+if (args is ["--upstream-only"]) { await UpstreamProxyChecks.RunAsync(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../"))); return; }
+if (args is ["--proxy-preflight-only"]) { ProxyPreflightChecks.Run(); await ViewModelChecks.RunAsync(); return; }
+if (args is ["--sandbox-proxy-preflight"]) { await SandboxProxyPreflightChecks.RunAsync(); return; }
+
+if (args is ["--network-tools-only"]) { await NetworkToolsChecks.RunAsync(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../"))); return; }
+
+if (args.Length == 1 && args[0] == "--vpn-route-live")
+{
+    await VpnRouteLiveChecks.RunAsync(); return;
+}
+
+if (args.Length == 1 && args[0] == "--routing-ui-only")
+{
+    await RoutingUiChecks.RunAsync(); return;
+}
+if (args.Length == 1 && args[0] == "--routing-traffic-only")
+{
+    await RoutingTrafficChecks.RunAsync(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../"))); return;
+}
+
 if (args.Length == 1 && args[0] == "--audit-fixes-only")
 {
     await StorageChecks.RunAsync();
@@ -86,6 +108,9 @@ if (args.Length == 1 && args[0] == "--updates-live-only")
     return;
 }
 var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../"));
+ProxyPreflightChecks.Run();
+await NetworkToolsChecks.RunAsync(root);
+await UpstreamProxyChecks.RunAsync(root);
 AlgorithmChecks.Run(root);
 await AndroidRefreshChecks.RunAsync(root);
 await RouteChecks.RunAsync();
@@ -121,6 +146,7 @@ if (args.Length == 1 && args[0] == "--storage-only")
     return;
 }
 await StorageChecks.RunAsync();
+await RoutingTrafficChecks.RunAsync(root);
 var core = Path.Combine(root, "core", "xray.exe");
 var gen = new XrayConfigGenerator();
 var node = new ServerNode { Address = "127.0.0.1", Port = 443, Uuid = "00000000-0000-0000-0000-000000000001", Security = "none", Network = "tcp", Flow = "" };

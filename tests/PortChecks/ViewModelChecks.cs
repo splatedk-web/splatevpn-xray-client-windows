@@ -26,12 +26,27 @@ internal static class ViewModelChecks
     }
     private static async Task CheckAsync()
     {
+        await ConnectionPreflightChecks();
         var store=new MemoryStorage();
         var a=new ServerNode {Id="a",Address="a.example",IsSelected=true};
         var b=new ServerNode {Id="b",Address="b.example",SubscriptionId="sub"};
         var c=new ServerNode {Id="c",Address="c.example"};
         store.Nodes=[a,b,c];store.Subscriptions=[new SubscriptionItem {Id="sub",Name="Subscription",Enabled=true}];
         var vm=new MainViewModel(store,new FakeCore(),new ConfigExportImportService(store),new FakeTraffic(),enableBackgroundWork:false);
+        var originalSettings = vm.Settings;
+        var profileTarget = System.Text.Json.JsonSerializer.Deserialize<AppSettings>(System.Text.Json.JsonSerializer.Serialize(originalSettings))!;
+        profileTarget.SettingsSchemaVersion=2; profileTarget.RoutingMode="global"; profileTarget.AiRoutingMode="dns_vpn"; profileTarget.EnableSniffing=false;
+        store.FailNextSettingsSave=true;
+        bool writeFailed=false; try { vm.CommitProfileSettings(profileTarget); } catch(IOException) { writeFailed=true; }
+        Check(writeFailed&&ReferenceEquals(vm.Settings,originalSettings),"profile save failure leaves current settings intact");
+        vm.CommitProfileSettings(profileTarget);
+        Check(vm.SelectedRoutingMode=="global"&&!vm.EnableSniffing&&vm.Settings.EnableAiDns&&vm.Settings.AiRoutingMode=="dns_vpn","profile publishes coherent observable settings");
+        vm.CommitProfileSettings(originalSettings);
+        vm.SetPersonalServersEnabled(false);
+        Check(!vm.IsServerEnabled(a) && vm.IsServerEnabled(b), "personal folder disabled independently of subscriptions");
+        var laterPersonal = new ServerNode { Address = "later.example" };
+        Check(!vm.IsServerEnabled(laterPersonal), "new personal configurations inherit folder state");
+        vm.SetPersonalServersEnabled(true);
         var gate=(SemaphoreSlim)typeof(MainViewModel).GetField("_connectionLock",BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(vm)!;
         await gate.WaitAsync();
         var first=vm.SelectServerAsync(b);var latest=vm.SelectServerAsync(c);gate.Release();await Task.WhenAll(first,latest);
@@ -54,6 +69,15 @@ internal static class ViewModelChecks
         try{((IServerStorage)store).SaveCatalog([],[]);throw new Exception("Write failure ignored");}catch(IOException){}
         Check(store.Nodes.Select(n=>n.Id).SequenceEqual(oldIds),"catalog rolls back server list when subscription write fails");
         vm.UiNotificationRequested+=(_,_,_)=>{};
+        var manual=new ServerNode {Address="roundtrip.example",Port=443,Uuid="00000000-0000-0000-0000-000000000001",Security="tls",Sni="",IsCustom=true};
+        vm.Servers.Add(manual);
+        var manualCount=vm.Servers.Count;
+        await vm.ProcessAnyLinkAsync(ServerShare.Link(manual,false));
+        Check(vm.Servers.Count==manualCount,"export/import of a manual server with implicit SNI does not create a duplicate");
+        var pinned=LinkParser.Parse(ServerShare.Link(manual,false))!;pinned.PinnedPeerCertSha256="different-certificate-pin";
+        Check(!LinkParser.SameEndpoint(manual,pinned),"distinct certificate pins cannot be silently deduplicated");
+        pinned.PinnedPeerCertSha256=null;pinned.Mldsa65Verify="different-verification-key";
+        Check(!LinkParser.SameEndpoint(manual,pinned),"distinct verification keys cannot be silently deduplicated");
         var before=vm.Servers.Count;
         var linkA="trojan://password%40one@same.example:443?security=tls#one";
         var linkB="trojan://password%40two@same.example:443?security=tls#two";
@@ -93,6 +117,36 @@ internal static class ViewModelChecks
         await vm.PingAllServersInternalAsync();
         Check(first.Ping==40 && second.Ping==40 && updates.Last()==(2,2,false) && platform.TunStops==0,"scan restarts after cancellation without touching TUN");
     }
+    private static async Task ConnectionPreflightChecks()
+    {
+        var node=new ServerNode{Id="preflight",Address="127.0.0.1",Security="none"};
+        var store=new MemoryStorage{Nodes=[node]};store.LoadSettings().EnableTunMode=true;
+        var core=new LiveCore();var platform=new TestPlatform();var probes=new TestProbes();
+        var vm=new MainViewModel(store,core,new ConfigExportImportService(store),new FakeTraffic(),false,platform,probes);
+        var conflict=new ProxyPreflight(true,true,"original");platform.ProxyState=conflict;
+        var confirmations=0;
+        vm.ConfirmationRequested=(title,message)=>{confirmations++;Check(title.Contains("TUN")&&message.Contains("PAC"),"TUN conflict explains PAC before touching Windows");return Task.FromResult(false);};
+        await vm.ToggleConnectionCommand.ExecuteAsync(null);
+        Check(!vm.IsConnected&&core.StartCalls==0&&platform.TunStarts==0&&platform.Suspensions==0&&platform.ProxyState==conflict,"declining proxy preflight does not start core or change proxy");
+        vm.ConfirmationRequested=(_,_)=>Task.FromResult(true);core.RejectNext=true;
+        await vm.ToggleConnectionCommand.ExecuteAsync(null);
+        Check(!vm.IsConnected&&platform.Suspensions==0&&platform.ProxyState==conflict,"core rejection leaves approved foreign proxy untouched");
+        await vm.ToggleConnectionCommand.ExecuteAsync(null);
+        Check(vm.IsConnected&&platform.Suspensions==1&&!platform.ProxyState.HasConflict&&platform.TunStarts==1,"approved TUN connection disables proxy before tunnel startup");
+        var before=confirmations;await vm.SwitchServerAsync(node);Check(confirmations==before,"server switching in clean TUN does not prompt again");
+        vm.Disconnect();platform.ProxyState=conflict;
+        var held=new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        vm.ConfirmationRequested=(_,_)=>held.Task;var connecting=vm.ToggleConnectionCommand.ExecuteAsync(null);await Dispatcher.Yield();
+        platform.ProxyState=new(true,false,"changed");held.SetResult(true);await connecting;
+        Check(!vm.IsConnected&&platform.ProxyState.Signature=="changed"&&platform.TunStarts==1,"proxy changed during confirmation is not overwritten");
+        platform.ProxyState=conflict;held=new(TaskCreationOptions.RunContinuationsAsynchronously);vm.ConfirmationRequested=(_,_)=>held.Task;
+        var starts=core.StartCalls;connecting=vm.ToggleConnectionCommand.ExecuteAsync(null);await Dispatcher.Yield();vm.Disconnect();held.SetResult(true);await connecting;
+        Check(core.StartCalls==starts&&!vm.IsConnected,"late confirmation cannot reconnect after cancellation");
+        platform.ProxyState=ProxyPreflight.None;platform.PreflightError=new IOException("HTTP port busy");
+        await vm.ToggleConnectionCommand.ExecuteAsync(null);Check(core.StartCalls==starts&&!vm.IsConnected&&vm.ConnectionDetail.Contains("busy"),"environment error is reported before touching core");
+        vm.Disconnect();
+        Console.WriteLine("PASS connection preflight: confirm/decline, startup rejection, proxy race, cancellation, occupied environment, silent clean TUN switching");
+    }
     private static async Task ConnectedSessionChecks()
     {
         var store=new MemoryStorage();
@@ -106,6 +160,34 @@ internal static class ViewModelChecks
         var vm=new MainViewModel(store,core,new ConfigExportImportService(store),traffic,false,platform,probes,new BalancerPolicy(()=>clock));
         await vm.ToggleConnectionCommand.ExecuteAsync(null);
         Check(vm.IsConnected&&platform.TunStarts==1&&probes.CurrentCalls==0,"startup uses local readiness, not an external HTTP gate");
+        Check(!vm.HasPendingConnectionSettings,"new session matches saved settings");
+        vm.Settings.Theme="light";
+        Check(!vm.HasPendingConnectionSettings,"appearance does not require reconnection");
+        vm.Settings.DnsProvider="quad9";
+        Check(vm.HasPendingConnectionSettings,"DNS edit is detected against active snapshot");
+        await vm.SwitchServerAsync(a);
+        Check(!vm.HasPendingConnectionSettings&&core.LastConfig.Contains("9.9.9.9"),"DNS edit reaches new core configuration");
+        vm.Settings.HttpPort=11809; core.FailNext=true;
+        await vm.SwitchServerAsync(a);
+        Check(vm.IsConnected&&vm.HasPendingConnectionSettings&&vm.ActiveHttpPort==10809,"failed port apply preserves active port and pending status");
+        var report=await vm.GetConnectionDiagnosticAsync();
+        Check(report.Contains("неприменённые")&&!report.Contains("vless://")&&!report.Contains("127.0.0.2"),"diagnostic distinguishes saved and active settings without server links");
+        vm.Settings.HttpPort=10809;
+        var applyWindow=new SplateClientDesktop.MainWindow(vm);
+        applyWindow.Closing-=(System.ComponentModel.CancelEventHandler)Delegate.CreateDelegate(typeof(System.ComponentModel.CancelEventHandler),applyWindow,
+            typeof(SplateClientDesktop.MainWindow).GetMethod("OnClosing",BindingFlags.Instance|BindingFlags.NonPublic|BindingFlags.DeclaredOnly)!);
+        var applyVersion=typeof(SplateClientDesktop.MainWindow).GetField("_settingsApplyVersion",BindingFlags.Instance|BindingFlags.NonPublic)!;
+        var applyMethod=typeof(SplateClientDesktop.MainWindow).GetMethod("ApplyConnectionSettingsAsync",BindingFlags.Instance|BindingFlags.NonPublic)!;
+        var holdApply=new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        core.HoldStart=holdApply;
+        vm.Settings.DnsProvider="google";applyVersion.SetValue(applyWindow,1);
+        var applying=(Task)applyMethod.Invoke(applyWindow,null)!;
+        for(var i=0;i<300&&core.HoldStart!=null;i++)await Task.Delay(10);
+        Check(core.HoldStart==null,"settings application reached held core startup");
+        vm.Settings.HttpPort=11809;applyVersion.SetValue(applyWindow,2);
+        holdApply.SetResult(true);await applying.WaitAsync(TimeSpan.FromSeconds(15));
+        Check(vm.ActiveHttpPort==11809&&!vm.HasPendingConnectionSettings,"edit arriving during core startup is applied by next worker iteration");
+        vm.Settings.HttpPort=10809;await vm.SwitchServerAsync(a);applyWindow.Close();
         platform.UplinkName="Беспроводная сеть";
         var uplinkReads=platform.UplinkReads;
         core.EmitExitDuringStart=true;
@@ -194,6 +276,7 @@ internal static class ViewModelChecks
         public List<ServerNode> Nodes=[];
         public List<SubscriptionItem> Subscriptions=[];
         public bool FailNextSubscriptionSave;
+        public bool FailNextSettingsSave;
         private AppSettings _settings=new(){PresetSubscriptionsInitialized=true,AutoUpdateSubscription=false};
         public List<ServerNode> LoadServers()=>Nodes.ToList();
         public void SaveServers(List<ServerNode> nodes)=>Nodes=nodes.ToList();
@@ -201,7 +284,7 @@ internal static class ViewModelChecks
         public List<SubscriptionItem> LoadSubscriptions()=>Subscriptions.ToList();
         public void SaveSubscriptions(List<SubscriptionItem> subscriptions){if(FailNextSubscriptionSave){FailNextSubscriptionSave=false;throw new IOException("Injected write failure");}Subscriptions=subscriptions.ToList();}
         public AppSettings LoadSettings()=>_settings;
-        public void SaveSettings(AppSettings settings)=>_settings=settings;
+        public void SaveSettings(AppSettings settings){if(FailNextSettingsSave){FailNextSettingsSave=false;throw new IOException("Injected settings failure");}_settings=settings;}
     }
     private sealed class FakeCore:IXrayProcessManager
     {
@@ -229,10 +312,12 @@ internal static class ViewModelChecks
         public bool FailNext,EmitExitDuringStart;
         public string LastConfig="";
         public bool RejectNext;
+        public int StartCalls;
         public TaskCompletionSource<bool>? HoldStart;
         public TaskCompletionSource<bool>? HoldRollback;
         public async Task<bool> StartAsync(string json,int httpPort=10809,int socksPort=10808,CancellationToken ct=default)
         {
+            StartCalls++;
             if(RejectNext){RejectNext=false;return false;}
             if(EmitExitDuringStart){OnProcessExited?.Invoke(0);EmitExitDuringStart=false;}
             IsRunning=false;
@@ -255,6 +340,13 @@ internal static class ViewModelChecks
         public void StopTun(Action<string> log){if(IsTunRunning)TunStops++;IsTunRunning=false;}
         public void EnableProxy(int h,int s){}
         public void DisableProxy(){}
+        public ProxyPreflight ProxyState = ProxyPreflight.None;
+        public int Suspensions,PreflightChecks;
+        public Exception? PreflightError;
+        public ProxyPreflight InspectProxyForTun()=>ProxyState;
+        public ProxyPreflight ReadProxyStatus()=>ProxyState;
+        public void SuspendProxyForTun(ProxyPreflight approved){if(ProxyState!=approved)throw new IOException("Proxy changed");Suspensions++;ProxyState=ProxyPreflight.None;}
+        public void CheckEnvironment(AppSettings settings,IReadOnlyCollection<int> ownedPorts){PreflightChecks++;if(PreflightError!=null)throw PreflightError;}
     }
     private sealed class TestProbes:IConnectionProbes
     {

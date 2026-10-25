@@ -3,8 +3,8 @@
   const palettes=window.SplatePalettes;
   let key='dark',glass=0,blurEnabled=true,canvas,ctx,frame=0,last=0;
   const reduced=matchMedia('(prefers-reduced-motion: reduce)');
-  const images={};
-  ['pony','winx'].forEach(name=>{const img=new Image();img.src='assets/themes/'+name+'.png';img.onload=()=>{draw();window.dispatchEvent(new Event('themeArtworkLoaded'));};images[name]=img;});
+  const images={},previewCache=new Map();
+  ['pony','winx'].forEach(name=>{const img=new Image();img.src='assets/themes/'+name+'.png';img.onload=()=>{previewCache.clear();draw();window.dispatchEvent(new Event('themeArtworkLoaded'));};images[name]=img;});
   const resolved=()=>key==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):key;
   const alpha=(hex,a)=>{const s=hex.slice(1,7);return `rgba(${parseInt(s.slice(0,2),16)},${parseInt(s.slice(2,4),16)},${parseInt(s.slice(4,6),16)},${a})`;};
   const luminance=hex=>{const c=[0,2,4].map(i=>parseInt(hex.slice(i+1,i+3),16)/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4);return c[0]*.2126+c[1]*.7152+c[2]*.0722;};
@@ -84,9 +84,15 @@
   function draw(time=0){if(!ctx)return;const r=devicePixelRatio||1,w=innerWidth,h=innerHeight;if(canvas.width!==w*r||canvas.height!==h*r){canvas.width=w*r;canvas.height=h*r;}ctx.setTransform(r,0,0,r,0,0);scene(ctx,w,h,palettes[resolved()]||palettes.dark,time);}
   function animate(time){frame=0;if(document.hidden||reduced.matches)return;if(time-last>=33){draw(time);last=time;}frame=requestAnimationFrame(animate);}
   function schedule(){cancelAnimationFrame(frame);frame=0;draw();if(!document.hidden&&!reduced.matches)frame=requestAnimationFrame(animate);}
-  window.SplateTheme={apply,palettes,preview:(target,name)=>{const c=target.getContext('2d');scene(c,target.width,target.height,palettes[name==='system'?'dark':name],0,true);},get key(){return key;},get glass(){return glass;}};
+  window.SplateTheme={apply,palettes,preview:(target,name)=>{
+    const cacheKey=name+':'+target.width+':'+target.height;
+    let cached=previewCache.get(cacheKey);
+    if(!cached){cached=document.createElement('canvas');cached.width=target.width;cached.height=target.height;scene(cached.getContext('2d'),cached.width,cached.height,palettes[name==='system'?'dark':name],0,true);previewCache.set(cacheKey,cached);}
+    target.getContext('2d').drawImage(cached,0,0);
+  },get key(){return key;},get glass(){return glass;}};
   try{apply(localStorage.getItem('splate-theme')||'dark',Number(localStorage.getItem('splate-glass'))||0,localStorage.getItem('splate-blur')!=='false');}catch(_){apply('dark',0,true);}
   document.addEventListener('DOMContentLoaded',()=>{canvas=document.createElement('canvas');canvas.id='themeBackdrop';canvas.setAttribute('aria-hidden','true');document.body.prepend(canvas);ctx=canvas.getContext('2d');schedule();});
+  addEventListener('themeArtworkLoaded',()=>previewCache.clear());
   addEventListener('resize',()=>draw());document.addEventListener('visibilitychange',schedule);reduced.addEventListener('change',schedule);
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>{if(key==='system')apply(key);});
 })();

@@ -23,6 +23,8 @@ internal static class AuditFixChecks
         try
         {
             var source = new ServerStorage(Path.Combine(temporary, "source"));
+            Check(source.LoadSettings().AiRoutingMode == "vpn" && !source.LoadSettings().EnableAiDns,
+                "missing settings do not silently enable SmartDNS");
             source.SaveServers(new() { new ServerNode { Address = "new.example", Id = "new" } });
             source.SaveSubscriptions(new() { new SubscriptionItem { Name = "new" } });
             source.SaveSettings(new AppSettings());
@@ -109,6 +111,8 @@ internal static class AuditFixChecks
             Directory.Delete(sitePath);
             Check(await Update(geoip, geosite), "real bundled databases accepted by Xray");
             Check(File.ReadAllBytes(ipPath).SequenceEqual(geoip) && File.ReadAllBytes(sitePath).SequenceEqual(geosite), "both validated databases installed");
+            Check(!await GeoAssetUpdaterService.RollbackAsync(core), "incomplete or invalid previous databases cannot replace working data");
+            Check(await Update(geoip, geosite) && await GeoAssetUpdaterService.RollbackAsync(core), "previous valid databases support checked rollback");
             Console.WriteLine("PASS audit geo: short/malformed files, partial download, replacement rollback and real Xray validation");
         }
         finally { Directory.Delete(temporary, true); }
@@ -118,7 +122,9 @@ internal static class AuditFixChecks
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
         {
-            var isIp = request.RequestUri!.AbsolutePath.EndsWith("/geoip.dat");
+            var isIp = request.RequestUri!.AbsolutePath.Contains("/geoip.dat");
+            if (request.RequestUri.AbsolutePath.EndsWith(".sha256sum"))
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Convert.ToHexString(SHA256.HashData(isIp ? ip : site))) });
             return Task.FromResult(new HttpResponseMessage(!isIp && failSecond ? HttpStatusCode.BadGateway : HttpStatusCode.OK)
             { Content = new ByteArrayContent(isIp ? ip : site) });
         }

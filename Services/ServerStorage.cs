@@ -27,6 +27,7 @@ public class ServerStorage : IServerStorage
 
     private readonly string _subscriptionsFile;
     public string? LastLoadWarning { get; private set; }
+    public string? SettingsRecoveryNotice { get; private set; }
 
     public List<ServerNode> LoadServers()
     {
@@ -126,7 +127,8 @@ public class ServerStorage : IServerStorage
             {
                 [_serversFile] = JsonSerializer.SerializeToUtf8Bytes(servers),
                 [_subscriptionsFile] = JsonSerializer.SerializeToUtf8Bytes(subscriptions),
-                [_settingsFile] = JsonSerializer.SerializeToUtf8Bytes(settings)
+                [_settingsFile] = JsonSerializer.SerializeToUtf8Bytes(settings),
+                [_settingsFile + ".last-good"] = JsonSerializer.SerializeToUtf8Bytes(settings)
             });
     }
     public void SaveCatalog(List<ServerNode> servers, List<SubscriptionItem> subscriptions)
@@ -215,6 +217,7 @@ public class ServerStorage : IServerStorage
                 {
                     var json = File.ReadAllText(_settingsFile);
                     var s = JsonSerializer.Deserialize<AppSettings>(json);
+                    if (s == null) throw new JsonException("Settings cannot be null.");
                     if (s != null)
                     {
                         if (SettingsCompatibility.Normalize(s))
@@ -227,8 +230,24 @@ public class ServerStorage : IServerStorage
                     }
                 }
             }
-            catch { }
-            return new AppSettings { EnableAiDns = true };
+            catch (Exception ex) when (ex is JsonException or ArgumentException)
+            {
+                // Keep the damaged original before any later automatic settings save.
+                if (File.Exists(_settingsFile)) File.Copy(_settingsFile, _settingsFile + ".damaged-" + Guid.NewGuid().ToString("N"));
+                try
+                {
+                    var recovered = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(_settingsFile + ".last-good"));
+                    if (recovered != null)
+                    {
+                        SettingsCompatibility.Normalize(recovered); SaveSettings(recovered);
+                        SettingsRecoveryNotice = "Повреждённые настройки сохранены отдельно. Восстановлена последняя исправная копия.";
+                        return recovered;
+                    }
+                }
+                catch (Exception recovery) when (recovery is JsonException or IOException or UnauthorizedAccessException or ArgumentException) { }
+                SettingsRecoveryNotice = "Настройки не удалось восстановить. Повреждённый файл сохранён отдельно; используются стандартные настройки VPN. Проверьте маршруты перед подключением.";
+            }
+            return new AppSettings { AiRoutingMode = "vpn", EnableAiDns = false };
         }
     }
 
@@ -237,9 +256,10 @@ public class ServerStorage : IServerStorage
         lock (_ioLock)
         {
             var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true });
-            var temp = _settingsFile + ".tmp";
-            File.WriteAllText(temp, json);
-            File.Move(temp, _settingsFile, overwrite: true);
+            AtomicFileSet.Write(new Dictionary<string, byte[]> {
+                [_settingsFile] = System.Text.Encoding.UTF8.GetBytes(json),
+                [_settingsFile + ".last-good"] = System.Text.Encoding.UTF8.GetBytes(json)
+            });
         }
     }
 }

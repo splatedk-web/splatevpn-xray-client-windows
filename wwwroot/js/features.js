@@ -54,7 +54,7 @@
   $('setAutoFallback').closest('.settings-section').after(document.querySelector('.balancer-card'));
   $('setKillSwitch').closest('.setting-item').hidden=true;$('setDnsLeakProtection').closest('.setting-item').hidden=true;
   const toolbar=$('serverSort').closest('.server-list-meta');
-  toolbar.insertAdjacentHTML('beforeend',`<label for="setPingMode">Метод проверки</label><select id="setPingMode" class="tactical-select desktop-setting"><option value="tcp">TCP</option><option value="http">Отклик HTTPS</option></select><button id="btnServersAutoSelect" class="btn-secondary">Автовыбор</button>`);
+  toolbar.insertAdjacentHTML('beforeend',`<label for="setPingMode">Метод проверки</label><select id="setPingMode" class="tactical-select desktop-setting"><option value="tcp">TCP</option><option value="http">Real ping · HTTPS</option></select><button id="btnServersAutoSelect" class="btn-secondary">Автовыбор</button>`);
   schema.pingMode=['setPingMode','value'];$('btnServersAutoSelect').onclick=()=>send({action:'autoSelectServer'});
   function draggableCapsule(selector){
     const items=[...document.querySelectorAll(selector)];let origin=null,moved=false;
@@ -80,6 +80,19 @@
   document.querySelector('.settings-grid').insertAdjacentHTML('beforeend','<div class="card settings-section"><div class="settings-sec-header"><h3>Геоданные Xray</h3></div><p class="settings-help">Списки доменов и IP для Smart RU, рекламы и маршрутов.</p><button id="btnUpdateGeo" class="btn-secondary">Обновить geosite / geoip</button></div>');
   document.body.insertAdjacentHTML('beforeend',`<dialog id="toolsDialog" class="app-dialog tools-dialog"><div class="modal-header"><h3 id="toolsTitle"></h3><button id="btnCloseTools" class="btn-secondary" aria-label="Закрыть">×</button></div><div id="toolsContent"></div></dialog>`);
   $('btnCloseTools').onclick=()=>$('toolsDialog').close();
+  $('btnCheckAi').insertAdjacentHTML('afterend','<button id="btnCancelAiCheck" class="btn-secondary" hidden>Остановить проверку</button>');
+  $('btnCancelAiCheck').onclick=()=>send({action:'cancelAiConnectivity'});
+  addEventListener('splateMessage',e=>{if(e.detail.type==='operation'&&e.detail.payload.operation==='checkAiConnectivity'){$('btnCheckAi').disabled=e.detail.payload.busy;$('btnCancelAiCheck').hidden=!e.detail.payload.busy;}});
+  document.querySelector('.connection-tools .artifact-actions').insertAdjacentHTML('beforeend','<button id="btnConnectionDiagnostic" class="btn-secondary">Диагностика соединения</button>');
+  $('btnConnectionDiagnostic').onclick=()=>{openTool('Диагностика соединения');$('toolsContent').textContent='Проверяем активные настройки и локальные порты…';send({action:'connectionDiagnostic'});};
+  addEventListener('splateMessage',e=>{
+    if(e.detail.type==='connectionDiagnostic'){
+      const report=document.createElement('pre');report.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere';report.textContent=e.detail.payload.message;
+      const copy=document.createElement('button');copy.className='btn-secondary';copy.textContent='Копировать отчёт';copy.onclick=()=>send({action:'copyConnectionDiagnostic'});
+      $('toolsContent').replaceChildren(report,copy);
+    }
+    if(e.detail.type==='operation'&&e.detail.payload.operation==='connectionDiagnostic')$('btnConnectionDiagnostic').disabled=e.detail.payload.busy;
+  });
   document.querySelector('.connection-tools .artifact-actions').insertAdjacentHTML('beforeend','<button id="btnShowWidget" class="btn-secondary">Мини-виджет</button>');
   const actions={btnImportLinks:'importLinks',btnManualServer:'manualServer',btnExportLinks:'exportServers',btnScanQrScreen:'scanQrScreen',btnUpdateGeo:'updateGeoAssets',btnSpeedTest:'speedTest',btnCancelSpeedTest:'cancelSpeedTest',btnShowWidget:'showWidget'};
   Object.entries(actions).forEach(([id,action])=>$(id).onclick=()=>send({action}));

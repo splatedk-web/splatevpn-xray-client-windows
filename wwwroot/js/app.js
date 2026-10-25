@@ -5,6 +5,9 @@
 
 (function () {
   'use strict';
+  let latestSettingsRequestId = null;
+  let settingsRequestSequence = 0;
+  const settingsSessionId = String(Date.now()) + '-' + Math.random().toString(36).slice(2);
 
   function showNotification({title = '', message = '', kind = 'info'} = {}) {
     const region = document.getElementById('notificationRegion');
@@ -207,7 +210,7 @@
     });
     document.querySelectorAll('button[title]').forEach(button => button.setAttribute('aria-label', button.title));
     ['toggleTunMode','toggleSmartRu','toggleKillSwitch','toggleAutoFallback'].forEach((id, i) =>
-      document.getElementById(id).setAttribute('aria-label', ['Системный туннель TUN','Российские сайты напрямую','Kill Switch','Автовыбор при обрыве'][i]));
+      document.getElementById(id).setAttribute('aria-label', ['Системный туннель TUN','Умная маршрутизация','Kill Switch','Автовыбор при обрыве'][i]));
 
     // Signal C# backend that frontend is ready to receive state
     sendToHost({ action: 'ready' });
@@ -327,7 +330,8 @@
     if (els.toggleSmartRu) {
       els.toggleSmartRu.addEventListener('change', (e) => {
         const mode = e.target.checked ? 'smart_ru' : 'global';
-        sendToHost({ action: 'setSetting', key: 'RoutingMode', value: mode });
+        document.getElementById('setRoutingMode').value = mode;
+        saveCurrentSettings();
       });
     }
 
@@ -366,7 +370,7 @@
 
   function updateAdapterUI(isTun) {
     if (state.isConnected) isTun = state.activeTunMode;
-    const modeStr = isTun ? 'Wintun TUN' : 'System Proxy';
+    const modeStr = isTun ? 'TUN' : 'Системный прокси';
     if (els.sidebarAdapterText) els.sidebarAdapterText.textContent = modeStr;
     if (els.microAdapter) els.microAdapter.textContent = modeStr;
   }
@@ -489,6 +493,7 @@
   // --- Render Server List ---
   function renderServerList() {
     if (!els.serverListContainer) return;
+    const openActions = new Set(Array.from(els.serverListContainer.querySelectorAll('.server-card details[open]'), e => e.closest('[data-id]').dataset.id));
     let filtered = SplateNodes.filter(state.servers,{...state,source:document.getElementById('subscriptionSource').value});
     document.getElementById('serverResultCount').textContent = `Показано ${filtered.length} из ${state.servers.length}`;
     document.getElementById('nodeSelectionContext').textContent=state.selectedServer ? `${state.isConnected?'Подключён':'Выбран'}: ${state.selectedServer.displayName||state.selectedServer.address}` : 'Сервер не выбран · выберите узел в списке';
@@ -538,7 +543,7 @@
       let pingClass = 'ping-gray';
       let pingText = srv.ping < 0 ? 'Нет ответа' : '—';
       if (srv.ping > 0) {
-        pingText = `${srv.ping} ms`;
+        pingText = `${srv.ping} мс`;
         if (srv.ping < 120) pingClass = 'ping-green';
         else if (srv.ping < 280) pingClass = 'ping-yellow';
         else pingClass = 'ping-red';
@@ -607,6 +612,7 @@
         if(srv.enabled !== false) sendToHost({ action: 'selectServer', id: srv.id });
       });
 
+      if (openActions.has(srv.id)) card.querySelector('details').open = true;
       els.serverListContainer.appendChild(card);
     });
     if(document.getElementById('groupServers').checked){
@@ -632,6 +638,7 @@
 
   function showAutoSaveStatus(isSaving) {
     if (!els.autoSaveIndicator) return;
+    els.autoSaveIndicator.hidden = !isSaving;
     if (isSaving) {
       els.autoSaveIndicator.classList.add('saving');
       if (els.autoSaveText) els.autoSaveText.textContent = 'Сохранение...';
@@ -642,7 +649,6 @@
   }
 
   function saveCurrentSettings() {
-    if (document.getElementById('setAiXboxDns').checked) document.getElementById('setSniffing').checked = true;
     showAutoSaveStatus(true);
 
     const newSettings = {
@@ -672,9 +678,10 @@
     };
 
     if (!Number.isInteger(newSettings.httpPort) || !Number.isInteger(newSettings.socksPort) || newSettings.httpPort < 1 || newSettings.httpPort > 65535 || newSettings.socksPort < 1 || newSettings.socksPort > 65535 || newSettings.httpPort === newSettings.socksPort) {
+      els.autoSaveIndicator.hidden = false;
       els.autoSaveText.textContent = 'Укажите разные порты от 1 до 65535';
       els.autoSaveIndicator.classList.remove('saving');
-      return;
+      return false;
     }
     if (!newSettings.enableTunMode || !newSettings.enableSniffing) { newSettings.isFakeDns = false; els.setIsFakeDns.checked = false; }
     window.SplateTheme.apply(newSettings.theme,newSettings.glassTransparency,newSettings.glassBlurEnabled);
@@ -693,10 +700,14 @@
       els.toggleAutoFallback.checked = els.setAutoFallback.checked;
     }
 
-    sendToHost({ action: 'saveSettings', settings: newSettings });
+    latestSettingsRequestId = settingsSessionId + ':' + (++settingsRequestSequence);
+    sendToHost({ action: 'saveSettings', settings: newSettings, settingsRequestId: latestSettingsRequestId });
+    return true;
 
 
   }
+
+  window.SplateFlushSettings=()=>{clearTimeout(autoSaveTimer);autoSaveTimer=null;return saveCurrentSettings();};
 
   function setupSettingsEvents() {
     [['btnExportConfig', 'exportConfig'], ['btnImportConfig', 'importConfig'], ['btnScanQr', 'scanQr'], ['btnRestartElevated', 'restartElevated']].forEach(([id, action]) => document.getElementById(id).addEventListener('click', () => sendToHost({action})));
@@ -720,7 +731,7 @@
       ,...document.querySelectorAll('.desktop-setting')
     ];
 
-    settingInputs.forEach((input) => {
+    new Set(settingInputs).forEach((input) => {
       if (!input) return;
       input.addEventListener('change', () => {
         saveCurrentSettings();
@@ -941,6 +952,7 @@
         }
       }
       if (!msg || !msg.type) return;
+      if ((msg.type==='settings'||msg.type==='extendedSettings') && latestSettingsRequestId!==null && msg.settingsRequestId!==latestSettingsRequestId) return;
       window.dispatchEvent(new CustomEvent('splateMessage',{detail:msg}));
       if(msg.type==='subscriptions'){state.subscriptions=msg.payload||[];renderServerList();}
       if(msg.type==='extendedSettings'){
@@ -989,6 +1001,7 @@
           break;
         case 'settingsError':
           showAutoSaveStatus(false);
+          els.autoSaveIndicator.hidden = false;
           els.autoSaveText.textContent = msg.payload.message || 'Не удалось сохранить настройки';
           break;
         case 'traffic':
@@ -1081,7 +1094,11 @@
     }
 
     document.getElementById('homeAiRoute').textContent = !state.isConnected ? 'Применится при подключении' :
-      (data.activeAiDns ? 'Нейросети · '+(data.activeAiDnsLabel||'SmartDNS') : data.activeAiMode==='vpn' ? 'Нейросети · VPN' : 'Нейросети · обычные правила');
+      (data.activeAiDns ? 'Нейросети · '+(data.activeAiDnsLabel||'SmartDNS')+(data.activeAiMode==='dns_vpn'?' через VPN':' напрямую') : data.activeAiMode==='vpn' ? 'Нейросети · VPN' : 'Нейросети · обычные правила');
+    document.getElementById('routingAppliedStatus').textContent = !state.isConnected ? 'Выбранные маршруты применятся при подключении.' :
+      (state.isConnecting ? 'Применение настроек… Сейчас активно: ' : data.pendingConnectionSettings ? 'Есть неприменённые настройки. Сейчас активно: ' : 'Активно в ядре: ') +
+      (data.activeRoutingMode==='global' ? 'глобальный маршрут через VPN' : 'умный маршрут · '+({ru:'Россия',cn:'Китай',ir:'Иран',global:'международный'}[data.activeRoutingRegion]||'Россия')) + ' · Нейросети: ' +
+      (data.activeAiDns ? (data.activeAiMode==='dns_vpn'?'SmartDNS через VPN':'SmartDNS, напрямую') : data.activeAiMode==='vpn' ? 'через VPN' : 'по обычным правилам');
     // Session stats
     if (els.sessionDurationVal) els.sessionDurationVal.textContent = state.sessionDuration;
     if (els.currentIpVal) els.currentIpVal.textContent = state.currentIp;
@@ -1121,7 +1138,7 @@
     if (els.microProtocol) els.microProtocol.textContent = srv.protocol || 'VLESS';
 
     if (els.selectedServerPingText) {
-      els.selectedServerPingText.textContent = srv.ping > 0 ? `${srv.ping} ms` : '—';
+      els.selectedServerPingText.textContent = srv.ping > 0 ? `${srv.ping} мс` : '—';
     }
   }
 
@@ -1142,7 +1159,7 @@
     if (state.selectedServer && state.selectedServer.id === data.id) {
       state.selectedServer.ping = data.ping;
       if (els.selectedServerPingText) {
-        els.selectedServerPingText.textContent = data.ping > 0 ? `${data.ping} ms` : '—';
+        els.selectedServerPingText.textContent = data.ping > 0 ? `${data.ping} мс` : '—';
       }
     }
 
@@ -1154,7 +1171,7 @@
           let pingClass = 'ping-gray';
           let pingText = data.ping < 0 ? 'Нет ответа' : '—';
           if (data.ping > 0) {
-            pingText = `${data.ping} ms`;
+            pingText = `${data.ping} мс`;
             if (data.ping < 120) pingClass = 'ping-green';
             else if (data.ping < 280) pingClass = 'ping-yellow';
             else pingClass = 'ping-red';
@@ -1189,6 +1206,7 @@
     updateAdapterUI(Boolean(settings.enableTunMode));
 
     if (els.toggleSmartRu) els.toggleSmartRu.checked = (settings.routingMode === 'smart_ru');
+    if (settings.routingMode) document.getElementById('setRoutingMode').value = settings.routingMode;
     if (els.setXhttpMode && settings.xhttpModeOverride) els.setXhttpMode.value = settings.xhttpModeOverride;
     if (els.setBufferSize && settings.bufferSize) els.setBufferSize.value = String(settings.bufferSize);
     if (els.setEnableFragment) els.setEnableFragment.checked = Boolean(settings.enableTlsFragment);

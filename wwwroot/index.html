@@ -8,7 +8,8 @@
   <script src="js/objects-data.js"></script>
   <script src="js/objects.js"></script>
   <script src="js/themes.js"></script>
-  <link rel="stylesheet" href="css/style.css?v=2.12.4">
+  <link rel="stylesheet" href="css/style.css?v=2.14.0">
+  <link rel="stylesheet" href="css/desktop-refresh.css?v=2.14.0">
 </head>
 <body>
   <div class="app-shell">
@@ -95,9 +96,9 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
               <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
             </svg>
-            <span class="adapter-text" id="sidebarAdapterText">Proxy</span>
+            <span class="adapter-text" id="sidebarAdapterText">Прокси</span>
           </div>
-          <div class="version-label">SplateVPN Desktop v2.12.5</div>
+          <div class="version-label">SplateVPN Desktop v2.14.0</div>
         </div>
       </nav>
 
@@ -143,7 +144,7 @@
                   <div class="divider"></div>
                   <div class="micro-stat">
                     <span class="label">АДАПТЕР</span>
-                    <span class="val color-cyan" id="microAdapter">Proxy</span>
+                    <span class="val color-cyan" id="microAdapter">Прокси</span>
                   </div>
                   <div class="divider"></div>
                   <div class="micro-stat">
@@ -332,7 +333,7 @@
                       </svg>
                     </div>
                     <div class="switch-text">
-                      <div class="switch-title">Smart RU маршрутизация</div>
+                      <div class="switch-title">Умный маршрут</div>
                       <div class="switch-desc">РФ ресурсы напрямую, блокировки через VPN</div>
                     </div>
                   </div>
@@ -424,7 +425,7 @@
           </div>
         </section>
 
-        <section class="tab-pane" id="tab-routing"><div class="settings-container"><div class="page-heading"><div><span class="eyebrow">SPLATE VPN</span><h1>Маршруты</h1><p>Smart RU и правила сайтов. Режим нейросетей переключается на главной и применяется автоматически.</p></div></div><div id="routingContent" class="settings-grid"></div><div class="card settings-section"><div class="settings-sec-header"><h3>Правила подключения</h3></div><p class="settings-help">Настройте маршруты для доменов, IP-адресов и подсетей. Сетевые изменения применяются после переподключения.</p></div></div></section>
+        <section class="tab-pane" id="tab-routing"><div class="settings-container"><div class="page-heading"><div><span class="eyebrow">SPLATE VPN</span><h1>Маршруты</h1><p>Умный маршрут и правила сайтов. Режим нейросетей переключается на главной и применяется автоматически.</p></div></div><div id="routingContent" class="settings-grid"></div><div class="card settings-section"><div class="settings-sec-header"><h3>Правила подключения</h3></div><p class="settings-help">Настройте маршруты для доменов, IP-адресов и подсетей. Сетевые изменения применяются после переподключения.</p></div></div></section>
         <!-- TAB: НАСТРОЙКИ -->
         <section class="tab-pane" id="tab-settings">
           <div class="settings-container">
@@ -451,11 +452,12 @@
               </div>
               <div class="card settings-section">
                 <div class="settings-sec-header"><h3>Маршрутизация</h3></div>
-                <div class="setting-item"><label for="setRoutingMode">Основной маршрут</label><select id="setRoutingMode" class="tactical-select desktop-setting"><option value="smart_ru">Smart RU — РФ напрямую</option><option value="global">Глобальный — всё через VPN</option></select></div>
+                <div class="setting-item"><label for="setRoutingMode">Основной маршрут</label><select id="setRoutingMode" class="tactical-select desktop-setting"><option value="smart_ru">Умный — свой регион напрямую</option><option value="global">Всё через VPN</option></select></div>
+                <p id="routingAppliedStatus" class="settings-help" role="status">Выбранные маршруты применятся при подключении.</p>
                 <input id="setAiDns" type="checkbox" hidden><input id="setAiProxy" type="checkbox" hidden><input id="setAiXboxDns" type="checkbox" hidden>
-                <div class="setting-item"><label for="setAiMode">Нейросети</label><select id="setAiMode" class="tactical-select desktop-setting"><option value="off">По обычным правилам</option><option value="vpn">Через VPN</option><option value="dns_ai">Через SmartDNS</option></select></div>
+                <div class="setting-item"><label for="setAiMode">Нейросети</label><select id="setAiMode" class="tactical-select desktop-setting"><option value="off">По обычным правилам</option><option value="vpn">Через VPN</option><option value="dns_ai">SmartDNS напрямую</option><option value="dns_vpn">SmartDNS через VPN</option></select></div>
                 <p id="aiModeHelp" class="settings-help" role="status"></p>
-                <div class="setting-item"><div class="item-text"><label>Определять домены трафика</label><p>TLS/HTTP sniffing для правил в TUN.</p></div><label class="toggle-switch"><input type="checkbox" id="setSniffing"><span class="slider"></span></label></div>
+                <div class="setting-item"><div class="item-text"><label>Определять домены трафика</label><p>TLS/HTTP sniffing для правил в TUN. Если выключить, правила доменов и SmartDNS могут не распознать соединения по IP.</p></div><label class="toggle-switch"><input type="checkbox" id="setSniffing"><span class="slider"></span></label></div>
                 <label class="rules-label" for="setProxyRules">Всегда через VPN</label><textarea id="setProxyRules" class="rules-input" rows="3" placeholder="example.com&#10;10.0.0.0/8"></textarea>
                 <label class="rules-label" for="setDirectRules">Всегда напрямую</label><textarea id="setDirectRules" class="rules-input" rows="3" placeholder="example.ru&#10;192.168.0.0/16"></textarea>
                 <label class="rules-label" for="setBlockRules">Блокировать</label><textarea id="setBlockRules" class="rules-input desktop-setting" rows="3" placeholder="ads.example.com"></textarea>
@@ -488,10 +490,10 @@
                 <div class="setting-item">
                   <div class="item-text">
                     <label>Режим XHTTP (SplitHTTP)</label>
-                    <p>Auto сохраняет режим из ссылки сервера. Меняйте только по рекомендации провайдера.</p>
+                    <p>Автовыбор сохраняет режим из ссылки сервера. Меняйте только по рекомендации провайдера.</p>
                   </div>
                   <select class="tactical-select" id="setXhttpMode">
-                    <option value="auto">auto (Рекомендуется)</option>
+                    <option value="auto">Автоматически (рекомендуется)</option>
                     <option value="stream-one">stream-one (Стриминг H2)</option>
                     <option value="packet-up">packet-up (Пакетный)</option>
                     <option value="stream-up">stream-up</option>
@@ -527,7 +529,7 @@
                 </div>
                 <div class="setting-item">
                   <div class="item-text">
-                    <label>DNS Провайдер</label>
+                    <label>DNS-провайдер</label>
                     <p>Защищённые DNS-запросы через зашифрованный туннель.</p>
                   </div>
                   <select class="tactical-select" id="setDnsProvider">
@@ -624,7 +626,7 @@
                   <line x1="12" y1="16" x2="12" y2="12"/>
                   <line x1="12" y1="8" x2="12.01" y2="8"/>
                 </svg>
-                <span>Сохраняется автоматически. Сетевые настройки применяются после переподключения.</span>
+                <span>Сохраняется автоматически. Изменения сети применяются с переподключением; состояние — в диагностике.</span>
               </div>
               <div class="auto-save-pill" id="autoSaveIndicator">
                 <span class="save-icon">
@@ -706,10 +708,13 @@
       <button id="confirmationAccept" class="btn-tactical btn-emerald" type="button">Подтвердить</button>
     </div>
   </dialog>
-  <script src="js/nodes.js?v=2.12.4"></script>
-  <script src="js/features.js?v=2.12.4"></script>
-  <script src="js/smart-tools.js?v=2.12.4"></script>
-  <script src="js/updates.js?v=2.12.4"></script>
-  <script src="js/app.js?v=2.12.4"></script>
+  <script src="js/nodes.js?v=2.14.0"></script>
+  <script src="js/features.js?v=2.14.0"></script>
+  <script src="js/smart-tools.js?v=2.14.0"></script>
+  <script src="js/network-tools.js?v=2.14.0"></script>
+  <script src="js/upstream-tools.js?v=2.14.0"></script>
+  <script src="js/updates.js?v=2.14.0"></script>
+  <script src="js/desktop-refresh.js?v=2.14.0"></script>
+  <script src="js/app.js?v=2.14.0"></script>
 </body>
 </html>

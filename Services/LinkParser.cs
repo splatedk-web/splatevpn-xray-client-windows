@@ -41,7 +41,17 @@ public static class LinkParser
     public static bool SameEndpoint(ServerNode a, ServerNode b) =>
         a.Protocol.Equals(b.Protocol, StringComparison.OrdinalIgnoreCase) && a.Address.Equals(b.Address, StringComparison.OrdinalIgnoreCase) &&
         a.Port == b.Port && a.Uuid == b.Uuid && a.Encryption == b.Encryption && a.Network == b.Network && a.Security == b.Security &&
-        a.Sni == b.Sni && a.PublicKey == b.PublicKey && a.ShortId == b.ShortId && a.Path == b.Path && a.Host == b.Host && a.Flow == b.Flow;
+        string.Equals(string.IsNullOrWhiteSpace(a.Sni) ? a.Address : a.Sni,
+            string.IsNullOrWhiteSpace(b.Sni) ? b.Address : b.Sni, StringComparison.OrdinalIgnoreCase) &&
+        a.PublicKey == b.PublicKey && a.ShortId == b.ShortId && a.Path == b.Path && a.Host == b.Host && a.Flow == b.Flow &&
+        a.Fingerprint == b.Fingerprint && a.Mode == b.Mode && a.Padding == b.Padding &&
+        (a.Alpn ?? "") == (b.Alpn ?? "") && (a.SpiderX ?? "") == (b.SpiderX ?? "") &&
+        (a.Mldsa65Verify ?? "") == (b.Mldsa65Verify ?? "") &&
+        (a.VerifyPeerCertByName ?? "") == (b.VerifyPeerCertByName ?? "") &&
+        (a.PinnedPeerCertSha256 ?? "") == (b.PinnedPeerCertSha256 ?? "") &&
+        a.XmuxMaxConnections == b.XmuxMaxConnections &&
+        (a.XmuxMaxRequestTimes ?? "") == (b.XmuxMaxRequestTimes ?? "") &&
+        (a.XmuxMaxReusableSecs ?? "") == (b.XmuxMaxReusableSecs ?? "");
 
     public static ServerNode? Parse(string rawLink, string subGroup = "Основное")
     {
@@ -70,6 +80,19 @@ public static class LinkParser
         if (string.IsNullOrWhiteSpace(text)) return result;
 
         var decodedText = TryDecodeBase64(text);
+        // A structured outbound profile must be validated as a whole. Never extract
+        // an incidental URI from a chain and silently discard its required hop.
+        if (decodedText.TrimStart().StartsWith('{') || decodedText.TrimStart().StartsWith('['))
+        {
+            try
+            {
+                using var document = JsonDocument.Parse(decodedText);
+                if ((document.RootElement.ValueKind == JsonValueKind.Object && document.RootElement.TryGetProperty("outbounds", out _)) ||
+                    (document.RootElement.ValueKind == JsonValueKind.Array && document.RootElement.EnumerateArray().Any(e => e.ValueKind == JsonValueKind.Object)))
+                    return ParseSingboxJson(decodedText, subGroup);
+            }
+            catch (JsonException) { }
+        }
 
         // 1. Direct line-by-line protocol link parsing
         var lines = decodedText.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
@@ -663,6 +686,7 @@ public static class LinkParser
         try
         {
             using var doc = JsonDocument.Parse(jsonText);
+            if (HasOutboundChain(doc.RootElement)) return result;
             JsonElement outboundsEl;
 
             if (doc.RootElement.ValueKind == JsonValueKind.Array)
@@ -687,6 +711,18 @@ public static class LinkParser
         catch { }
 
         return result;
+    }
+
+    private static bool HasOutboundChain(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Array) return element.EnumerateArray().Any(HasOutboundChain);
+        if (element.ValueKind != JsonValueKind.Object) return false;
+        foreach (var property in element.EnumerateObject())
+        {
+            if (property.Name is "detour" or "dialerProxy" or "proxySettings" && property.Value.ValueKind is not (JsonValueKind.Null or JsonValueKind.False) && property.Value.ToString() != "") return true;
+            if (HasOutboundChain(property.Value)) return true;
+        }
+        return false;
     }
 
     private static ServerNode? ParseSingleJsonOutbound(JsonElement el, string subGroup)

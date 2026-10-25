@@ -19,7 +19,14 @@ public class SubscriptionResult
 
 public static class SubscriptionService
 {
-    public static async Task<SubscriptionResult> FetchSubscriptionAsync(string url, Action<string>? log = null, int? proxyPort = null)
+    public static async Task<SubscriptionResult> FetchSubscriptionAsync(string url, Action<string>? log = null, int? proxyPort = null, CancellationToken ct = default)
+    {
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        budget.CancelAfter(TimeSpan.FromSeconds(30));
+        try { return await FetchCoreAsync(url, log, proxyPort, budget.Token); }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { throw new TimeoutException("Подписка не загрузилась за 30 секунд."); }
+    }
+    private static async Task<SubscriptionResult> FetchCoreAsync(string url, Action<string>? log, int? proxyPort, CancellationToken ct)
     {
         var cleanUrl = url.Trim();
 
@@ -51,8 +58,9 @@ public static class SubscriptionService
         // Попытка 1: со стандартным User-Agent (v2rayN / SplateClient)
         try
         {
-            subResult = await FetchInternalAsync(httpClient, cleanUrl, userAgent: "v2rayN/6.45 (Windows NT 10.0; Win64; x64) SplateClient/2.9.1", log);
+            subResult = await FetchInternalAsync(httpClient, cleanUrl, userAgent: "v2rayN/6.45 (Windows NT 10.0; Win64; x64) SplateClient/2.14.0", log, ct);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception ex) when (ex is TaskCanceledException || ex is HttpRequestException { StatusCode: null })
         {
             throw new HttpRequestException($"Не удалось подключиться к серверу подписки {uri.Authority}. Проверьте доступность сервера или обновите подписку через работающий VPN.", ex);
@@ -69,7 +77,7 @@ public static class SubscriptionService
             try
             {
                 log?.Invoke("[SUBSCRIPTION] Повторная попытка с User-Agent: ClashMeta/1.18.0...");
-                var clashResult = await FetchInternalAsync(httpClient, cleanUrl, userAgent: "ClashMeta/1.18.0", log);
+                var clashResult = await FetchInternalAsync(httpClient, cleanUrl, userAgent: "ClashMeta/1.18.0", log, ct);
                 if (clashResult.Nodes.Count > 0)
                 {
                     return clashResult;
@@ -79,6 +87,7 @@ public static class SubscriptionService
                     subResult = clashResult;
                 }
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex)
             {
                 log?.Invoke($"[SUBSCRIPTION] Повторный запрос (ClashMeta) завершился ошибкой: {ex.Message}");
@@ -99,7 +108,7 @@ public static class SubscriptionService
         return subResult;
     }
 
-    private static async Task<SubscriptionResult> FetchInternalAsync(HttpClient httpClient, string cleanUrl, string userAgent, Action<string>? log)
+    private static async Task<SubscriptionResult> FetchInternalAsync(HttpClient httpClient, string cleanUrl, string userAgent, Action<string>? log, CancellationToken ct)
     {
         var subResult = new SubscriptionResult();
 
@@ -108,7 +117,7 @@ public static class SubscriptionService
         request.Headers.Add("User-Agent", userAgent);
         request.Headers.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,application/x-yaml,text/yaml,text/plain,*/*;q=0.8");
 
-        using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseContentRead);
+        using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
 
         if (!response.IsSuccessStatusCode)
         {
@@ -144,7 +153,17 @@ public static class SubscriptionService
             }
         }
 
-        var rawContent = await response.Content.ReadAsStringAsync();
+        const int maxBytes = 32 * 1024 * 1024;
+        if (response.Content.Headers.ContentLength > maxBytes) throw new InvalidOperationException("Подписка превышает 32 МБ.");
+        await using var stream = await response.Content.ReadAsStreamAsync(ct);
+        using var content = new System.IO.MemoryStream(); var buffer = new byte[32768]; int count;
+        while ((count = await stream.ReadAsync(buffer, ct)) > 0)
+        {
+            if (content.Length + count > maxBytes) throw new InvalidOperationException("Подписка превышает 32 МБ.");
+            content.Write(buffer, 0, count);
+        }
+        ct.ThrowIfCancellationRequested();
+        var rawContent = Encoding.UTF8.GetString(content.ToArray());
         if (string.IsNullOrWhiteSpace(rawContent))
         {
             throw new InvalidOperationException("Сервер подписки вернул пустой ответ.");
@@ -156,15 +175,16 @@ public static class SubscriptionService
         var decoded = TryDecodeBase64(rawContent);
 
         // 2. Парсим узлы из декодированного или исходного текста
-        var result = LinkParser.ParseMultiple(decoded);
+        var result = await Task.Run(() => LinkParser.ParseMultiple(decoded), ct);
 
         // 3. Если ничего не найдено, пробуем распарсить исходный текст без декодирования
         if (result.Count == 0 && decoded != rawContent)
         {
-            result = LinkParser.ParseMultiple(rawContent);
+            result = await Task.Run(() => LinkParser.ParseMultiple(rawContent), ct);
         }
 
         log?.Invoke($"[SUBSCRIPTION] Успешно распознано узлов: {result.Count}");
+        ct.ThrowIfCancellationRequested();
         subResult.Nodes = result;
         return subResult;
     }

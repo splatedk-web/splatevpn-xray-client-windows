@@ -18,6 +18,9 @@ public class AppSettings
     public bool EnableAiDns { get; set; }
     public string AiDnsProvider { get; set; } = "dns_ai";
     public bool AiTlsFragment { get; set; }
+    public bool AiDnsAutoSwitch { get; set; } = true;
+    public List<ConnectionProfile> ConnectionProfiles { get; set; } = new();
+    public string? ConnectionProfileUndo { get; set; }
     public string AdBlockAllowlist { get; set; } = "";
     public string CustomDohUrl { get; set; } = "https://dns.google/dns-query";
     public bool EnableAdBlock { get; set; } = true;
@@ -28,6 +31,13 @@ public class AppSettings
     public string TlsFragmentInterval { get; set; } = "10-20";
     public string TlsFragmentPackets { get; set; } = "tlshello";
     public bool ShareLan { get; set; }
+    public string LanBindAddress { get; set; } = "";
+    public bool LanAuthEnabled { get; set; }
+    public string LanUsername { get; set; } = "splate";
+    public string LanPassword { get; set; } = "";
+    public bool UpstreamProxyEnabled { get; set; }
+    public string UpstreamProxyHost { get; set; } = "";
+    public int UpstreamProxyPort { get; set; } = 3128;
     public string ServerSort { get; set; } = "default";
     public string ServerFilter { get; set; } = "all";
     public int SettingsSchemaVersion { get; set; }
@@ -41,7 +51,12 @@ public class AppSettings
     public bool IsFakeDns { get; set; } = false;
     public bool EnableTlsFragment { get; set; } = false;
     public string XhttpModeOverride { get; set; } = "auto";
-    public string PingMode { get; set; } = "tcp"; // tcp, http
+    public string PingMode { get; set; } = "http"; // tcp, http (Real ping)
+    public string RoutingRegion { get; set; } = "ru";
+    public bool SetupCompleted { get; set; }
+    public bool PersonalServersEnabled { get; set; } = true;
+    public List<SubscriptionUpdateEntry> SubscriptionUpdateHistory { get; set; } = new();
+    public List<TemporaryRoute> TemporaryRoutes { get; set; } = new();
     public string SubAutoUpdateInterval { get; set; } = "24h"; // 6h, 12h, 24h, manual
     public string LastSubUpdateTime { get; set; } = string.Empty;
     public int SocksPort { get; set; } = 10808;

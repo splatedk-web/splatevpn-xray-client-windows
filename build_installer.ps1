@@ -1,7 +1,7 @@
 param([switch]$SkipBuild, [switch]$ForceZip)
 $ErrorActionPreference = 'Stop'
 $projectRoot = $PSScriptRoot
-$version = '2.12.5'
+$version = '2.14.0'
 $buildDir = Join-Path $projectRoot "release-v$version"
 $outputDir = Join-Path $projectRoot 'installer_output'
 $runtimeFolder = Join-Path $projectRoot 'runtime/WebView2'
@@ -29,15 +29,23 @@ foreach ($relative in @('runtime/WebView2/msedgewebview2.exe','runtime/WebView2/
     if (!(Test-Path -LiteralPath (Join-Path $buildDir $relative))) { throw "Package is incomplete: $relative" }
 }
 New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
-foreach ($relative in @('wwwroot/js/smart-tools.js','wwwroot/js/objects.js','wwwroot/js/objects-data.js','wwwroot/js/objects-data.json','Assets/filters/adguard-dns-source.bin','Assets/filters/additional.json','Assets/filters/ai-domains.json','Assets/licenses/AdGuard-DNS-filter-LICENSE','Assets/licenses/AdGuard-DNS-filter-NOTICE','wwwroot/assets/themes/object-sakura.png','wwwroot/assets/themes/object-ocean.png','wwwroot/assets/themes/object-cyberpunk.png','wwwroot/assets/themes/object-sunset.png','wwwroot/assets/themes/object-aurora.png','wwwroot/assets/themes/object-red.png')) {
+foreach ($relative in @('wwwroot/js/desktop-refresh.js','wwwroot/css/desktop-refresh.css','wwwroot/js/upstream-tools.js','wwwroot/js/network-tools.js','wwwroot/js/smart-tools.js','wwwroot/js/objects.js','wwwroot/js/objects-data.js','wwwroot/js/objects-data.json','Assets/filters/adguard-dns-source.bin','Assets/filters/additional.json','Assets/filters/ai-domains.json','Assets/licenses/AdGuard-DNS-filter-LICENSE','Assets/licenses/AdGuard-DNS-filter-NOTICE','wwwroot/assets/themes/object-sakura.png','wwwroot/assets/themes/object-ocean.png','wwwroot/assets/themes/object-cyberpunk.png','wwwroot/assets/themes/object-sunset.png','wwwroot/assets/themes/object-aurora.png','wwwroot/assets/themes/object-red.png')) {
     if (!(Test-Path -LiteralPath (Join-Path $buildDir $relative))) { throw "Package is incomplete: $relative" }
 }
-Copy-Item -LiteralPath (Join-Path $projectRoot 'README.md'),(Join-Path $projectRoot 'PORT_PARITY.md') -Destination $buildDir -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot 'README.md'),(Join-Path $projectRoot 'PORT_PARITY.md'),(Join-Path $projectRoot 'ANDROID_PARITY_2026-10-25.md') -Destination $buildDir -Force
 $zip = Join-Path $outputDir "SplateVPN_Portable_v$version.zip"
 Compress-Archive -Path (Join-Path $buildDir '*') -DestinationPath $zip -Force
 if (!$ForceZip) {
     $iscc = @('C:\Program Files (x86)\Inno Setup 6\ISCC.exe','C:\Program Files\Inno Setup 6\ISCC.exe') | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-    if ($iscc) { & $iscc (Join-Path $projectRoot 'installer.iss'); if ($LASTEXITCODE -ne 0) { throw 'Inno Setup failed' } }
+    if ($iscc) {
+        # Compile outside the shared output folder: Sandbox mappings and Explorer can
+        # hold the temporary executable open while Inno updates its resources.
+        $compilerStage = Join-Path $projectRoot ('installer_build/inno-' + [Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force -Path $compilerStage | Out-Null
+        & $iscc "/O$compilerStage" (Join-Path $projectRoot 'installer.iss')
+        if ($LASTEXITCODE -ne 0) { throw 'Inno Setup failed' }
+        Copy-Item -LiteralPath (Join-Path $compilerStage "SplateVPN_Setup_v$version.exe") -Destination $outputDir -Force
+    }
     else { Write-Host 'Inno Setup not installed; portable ZIP is ready.' }
 }
 Write-Host "Ready: $zip"

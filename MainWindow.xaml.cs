@@ -27,8 +27,12 @@ public partial class MainWindow : Window
     private readonly TrafficHistory _trafficHistory = new(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SplateVPN", "traffic-history.json"));
     private System.Threading.CancellationTokenSource? _speedTestCts;
     private System.Threading.CancellationTokenSource? _aiDnsCts;
+    private System.Threading.CancellationTokenSource? _aiCheckCts;
     private readonly System.Threading.CancellationTokenSource _adFilterLifetime = new();
     private bool _adFilterLoopStarted;
+    private string? _settingsRequestId;
+    private int _settingsApplyVersion;
+    private Task? _settingsApplyTask;
     private readonly System.Collections.Concurrent.ConcurrentQueue<object> _recentConnections = new();
 
     private const int HOTKEY_ID = 9001;
@@ -185,7 +189,7 @@ public partial class MainWindow : Window
                     SendServersToWeb();
                     SendSettingsToWeb();
                     SendAppUpdateToWeb();
-                    if (!_adFilterLoopStarted) { _adFilterLoopStarted = true; _ = RunAdFilterLoopAsync(); }
+                    if (!_adFilterLoopStarted) { _adFilterLoopStarted = true; _ = RunAdFilterLoopAsync(); _ = RunAiMonitorLoopAsync(); }
                     await WriteStartupDiagnosticsAsync(runtimeFolder);
                 }
                 catch (Exception error) { ShowRuntimeRecovery(error); await WriteStartupDiagnosticsAsync(runtimeFolder, error); }
@@ -242,7 +246,7 @@ public partial class MainWindow : Window
 
     private void SubscribeToViewModelEvents()
     {
-        _viewModel.ConnectionChanging += () => { _speedTestCts?.Cancel(); _aiDnsCts?.Cancel(); };
+        _viewModel.ConnectionChanging += () => { _speedTestCts?.Cancel(); _aiDnsCts?.Cancel(); _aiCheckCts?.Cancel(); _aiMonitorCts?.Cancel(); };
         _viewModel.SubscriptionsUpdated += SendSubscriptionsToWeb;
         _viewModel.UiNotificationRequested += (title, message, kind) => PostWebMessage("notification", new { title, message, kind });
         _viewModel.ConfirmationRequested = async (title, message) =>
@@ -369,6 +373,7 @@ public partial class MainWindow : Window
             var root = doc.RootElement;
             if (!root.TryGetProperty("action", out var actionElem)) return;
             var action = actionElem.GetString();
+            if (HandleNetworkTool(action, root)) return;
 
             switch (action)
             {
@@ -401,7 +406,8 @@ public partial class MainWindow : Window
                     PostWebMessage("recentConnections", _recentConnections.ToArray());
                     break;
                 case "showWidget":
-                    _overlay ??= new Views.CompactOverlayWindow(_viewModel, this) { Owner = this };
+                    // An owned WPF window is automatically hidden when its owner is minimized.
+                    _overlay ??= new Views.CompactOverlayWindow(_viewModel, this);
                     _overlay.Show();
                     break;
                 case "speedTest":
@@ -524,11 +530,30 @@ public partial class MainWindow : Window
                     break;
 
                 case "checkAiConnectivity":
-                    _ = Dispatcher.InvokeAsync(async () =>
+                    _ = RunWebOperationAsync("checkAiConnectivity", async () =>
                     {
-                        try { var report = await _viewModel.CheckAiConnectivityAsync(); PostWebMessage("aiConnectivity", new { message = report }); }
-                        catch (OperationCanceledException) { PostWebMessage("aiConnectivity", new { message = "Соединение изменилось. Повторите проверку." }); }
+                        using var cancellation = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(60));
+                        _aiCheckCts = cancellation;
+                        try { var report = await _viewModel.CheckAiConnectivityAsync(cancellation.Token); PostWebMessage("aiConnectivity", new { message = report }); }
+                        catch (OperationCanceledException) { PostWebMessage("aiConnectivity", new { message = "Проверка остановлена или соединение изменилось. VPN продолжает работать." }); }
                         catch (Exception ex) { PostWebMessage("aiConnectivity", new { message = "Ошибка проверки: " + ex.Message }); }
+                        finally { _aiCheckCts = null; }
+                    });
+                    break;
+                case "cancelAiConnectivity":
+                    _aiCheckCts?.Cancel();
+                    break;
+
+                case "connectionDiagnostic":
+                    _ = RunWebOperationAsync("connectionDiagnostic", async () =>
+                        PostWebMessage("connectionDiagnostic", new { message = await _viewModel.GetConnectionDiagnosticAsync() }));
+                    break;
+                case "copyConnectionDiagnostic":
+                    _ = RunWebOperationAsync("connectionDiagnostic", async () =>
+                    {
+                        var report = await _viewModel.GetConnectionDiagnosticAsync();
+                        Clipboard.SetText(report);
+                        PostWebMessage("notification", new { title = "Диагностика", message = "Отчёт скопирован.", kind = "info" });
                     });
                     break;
 
@@ -649,7 +674,8 @@ public partial class MainWindow : Window
                             var socksPort = settingsElem.TryGetProperty("socksPort", out var sp) ? sp.GetInt32() : _viewModel.Settings.SocksPort;
                             if (httpPort == socksPort || httpPort is < 1 or > 65535 || socksPort is < 1 or > 65535)
                                 throw new ArgumentException("Укажите разные HTTP/SOCKS порты от 1 до 65535.");
-                            var previousAiRoute = (_viewModel.Settings.AiRoutingMode, _viewModel.Settings.AiDnsProvider, _viewModel.Settings.AiTlsFragment);
+                            _settingsRequestId = root.TryGetProperty("settingsRequestId", out var requestId) ? requestId.GetString() : null;
+                            var previousConnection = ConnectionSettings.Signature(_viewModel.Settings);
                             ApplyExtendedSettings(settingsElem);
                             _viewModel.Settings.HttpPort = httpPort;
                             _viewModel.Settings.SocksPort = socksPort;
@@ -674,12 +700,15 @@ public partial class MainWindow : Window
                             if (settingsElem.TryGetProperty("autoFallbackFastestServer", out var afb)) _viewModel.AutoFallbackFastestServer = afb.GetBoolean();
                             if (settingsElem.TryGetProperty("autoUpdateSubscription", out var aus)) _viewModel.AutoUpdateSubscription = aus.GetBoolean();
 
-                            if (_viewModel.Settings.AiRoutingMode != "off") _viewModel.EnableSniffing = true;
                             if (!_viewModel.EnableTunMode || !_viewModel.EnableSniffing) _viewModel.IsFakeDns = false;
                             _viewModel.SaveSettingsCommand.Execute(null);
                             SendSettingsToWeb();
-                            if (previousAiRoute != (_viewModel.Settings.AiRoutingMode, _viewModel.Settings.AiDnsProvider, _viewModel.Settings.AiTlsFragment) && _viewModel.IsConnected && _viewModel.SelectedServer is { } activeNode)
-                                _ = RunWebOperationAsync("applyAiRoute", () => _viewModel.SwitchServerAsync(activeNode));
+                            if (previousConnection != ConnectionSettings.Signature(_viewModel.Settings) && (_viewModel.IsConnected || _viewModel.IsConnecting))
+                            {
+                                ++_settingsApplyVersion;
+                                if (_settingsApplyTask == null || _settingsApplyTask.IsCompleted)
+                                    _settingsApplyTask = RunWebOperationAsync("applyAiRoute", ApplyConnectionSettingsAsync);
+                            }
                         });
                     }
                     break;
@@ -738,6 +767,7 @@ public partial class MainWindow : Window
 
     private void PostWebMessage(string type, object payload)
     {
+        var acknowledgement = type is "settings" or "extendedSettings" ? _settingsRequestId : null;
         if (Dispatcher.CheckAccess())
         {
             SendInternal();
@@ -753,7 +783,8 @@ public partial class MainWindow : Window
             {
                 try
                 {
-                    var json = JsonSerializer.Serialize(new { type, payload });
+                    var json = JsonSerializer.Serialize(new { type, payload,
+                        settingsRequestId = acknowledgement });
                     WebBrowser.CoreWebView2.PostWebMessageAsJson(json);
                 }
                 catch { }
@@ -771,6 +802,9 @@ public partial class MainWindow : Window
             activeAiXboxDns = _viewModel.ActiveAiXboxDns,
             activeAiDns = _viewModel.ActiveAiDns,
             activeAiMode = _viewModel.ActiveAiMode,
+            activeRoutingMode = _viewModel.ActiveRoutingMode,
+            activeRoutingRegion = _viewModel.ActiveRoutingRegion,
+            pendingConnectionSettings = _viewModel.HasPendingConnectionSettings,
             activeAiDnsLabel = _viewModel.ActiveAiDnsLabel,
             isConnecting = _viewModel.IsConnecting,
             statusText = _viewModel.StatusText,
@@ -849,11 +883,14 @@ public partial class MainWindow : Window
         NativeThemeService.Apply(_viewModel.Settings.Theme, _viewModel.Settings.GlassTransparency);
         PostWebMessage("smartDnsProviders", SmartDnsProviders.All);
         PostWebMessage("extendedSettings", _viewModel.Settings);
+        SendProfiles();
         var endpoints = System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()
             .Where(n => n.OperationalStatus == System.Net.NetworkInformation.OperationalStatus.Up && n.NetworkInterfaceType != System.Net.NetworkInformation.NetworkInterfaceType.Loopback)
             .SelectMany(n => n.GetIPProperties().UnicastAddresses)
             .Where(a => a.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && !a.Address.ToString().StartsWith("198.18.") && !a.Address.ToString().StartsWith("172.19."))
             .Select(a => $"HTTP {a.Address}:{_viewModel.Settings.HttpPort} · SOCKS5 {a.Address}:{_viewModel.Settings.SocksPort}").ToArray();
+        if (!string.IsNullOrEmpty(_viewModel.Settings.LanBindAddress)) endpoints = endpoints.Where(line => line.StartsWith("HTTP " + _viewModel.Settings.LanBindAddress + ":", StringComparison.Ordinal)).ToArray();
+        PostWebMessage("lanInterfaces", LanSharing.Interfaces());
         PostWebMessage("lanEndpoints", endpoints);
         PostWebMessage("settings", new
         {
@@ -908,6 +945,7 @@ public partial class MainWindow : Window
 
     private async Task SelectAiDnsAsync()
     {
+        _aiMonitorCts?.Cancel();
         if (!_viewModel.Settings.EnableAiDns || !_viewModel.Settings.EnableAiBypass || _viewModel.Settings.AiRoutingMode != "dns_ai") throw new InvalidOperationException("Включите SmartDNS для нейросетей и выберите маршрут SmartDNS.");
         _aiDnsCts?.Dispose(); using var lifetime = new System.Threading.CancellationTokenSource(); _aiDnsCts = lifetime;
         try {
@@ -961,6 +999,22 @@ public partial class MainWindow : Window
         finally { _viewModel.IsSpeedTestRunning = false; _speedTestCts.Dispose(); _speedTestCts = null; }
     }
 
+    private async Task ApplyConnectionSettingsAsync()
+    {
+        int version;
+        do
+        {
+            version = _settingsApplyVersion;
+            await Task.Delay(400);
+            if (version != _settingsApplyVersion) continue;
+            if ((!_viewModel.IsConnected && !_viewModel.IsConnecting) || _viewModel.SelectedServer is not { } node) return;
+            await _viewModel.SwitchServerAsync(node);
+            if (version == _settingsApplyVersion && _viewModel.IsConnected && _viewModel.HasPendingConnectionSettings)
+                throw new IOException("Настройки сохранены, но не применены: ядро не удалось перезапустить. Проверьте диагностику соединения.");
+        } while (version != _settingsApplyVersion);
+        SendFullStateToWeb();
+    }
+
     private void ApplyExtendedSettings(JsonElement data)
     {
         var settings = JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(_viewModel.Settings))!;
@@ -968,6 +1022,10 @@ public partial class MainWindow : Window
         void Bool(string name, Action<bool> set) { if (data.TryGetProperty(name, out var value)) set(value.GetBoolean()); }
         void Str(string name, Action<string> set) { if (data.TryGetProperty(name, out var value)) set(value.GetString() ?? ""); }
         Bool("enableAiDns", v => settings.EnableAiDns = v);
+        Bool("aiDnsAutoSwitch", v => settings.AiDnsAutoSwitch = v);
+        Str("routingMode", v => settings.RoutingMode = v);
+        Str("routingRegion", v => settings.RoutingRegion = RoutingRegions.IsValid(v) ? v : throw new ArgumentException("Неизвестный регион."));
+        Bool("setupCompleted", v => settings.SetupCompleted = v);
         Str("aiRoutingMode", v => settings.AiRoutingMode = v);
         Str("customDohUrl", v => settings.CustomDohUrl = v);
         Bool("enableAdBlock", v => settings.EnableAdBlock = v);
@@ -977,7 +1035,16 @@ public partial class MainWindow : Window
         Str("tlsFragmentLength", v => settings.TlsFragmentLength = v);
         Str("tlsFragmentInterval", v => settings.TlsFragmentInterval = v);
         Str("tlsFragmentPackets", v => settings.TlsFragmentPackets = v);
+        Bool("upstreamProxyEnabled", v => settings.UpstreamProxyEnabled = v);
+        Str("upstreamProxyHost", v => settings.UpstreamProxyHost = v.Trim());
+        if (data.TryGetProperty("upstreamProxyPort", out var upstreamPort)) settings.UpstreamProxyPort = int.Parse(upstreamPort.ToString());
+        if (settings.UpstreamProxyEnabled) { UpstreamProxy.FromSettings(settings); settings.RoutingMode = "global"; }
         Bool("shareLan", v => settings.ShareLan = v);
+        Str("lanBindAddress", v => settings.LanBindAddress = v);
+        Bool("lanAuthEnabled", v => settings.LanAuthEnabled = v);
+        Str("lanUsername", v => settings.LanUsername = v);
+        Str("lanPassword", v => settings.LanPassword = v);
+        LanSharing.Validate(settings);
         Bool("startMinimized", v => settings.StartMinimized = v);
         Bool("enableGlobalHotkey", v => settings.EnableGlobalHotkey = v);
         if (settings.MuxConcurrency is < 1 or > 128 || !XrayConfigGenerator.ValidRange(settings.TlsFragmentLength, 1, 65535) ||
@@ -985,7 +1052,9 @@ public partial class MainWindow : Window
             !(settings.TlsFragmentPackets == "tlshello" || XrayConfigGenerator.ValidRange(settings.TlsFragmentPackets, 1, 100)))
             throw new ArgumentException("Проверьте параллельность Mux и диапазоны фрагментации TLS.");
         XrayConfigGenerator.ValidateDoh(settings.CustomDohUrl);
-        if (settings.AiRoutingMode is not ("off" or "vpn" or "dns_ai")) throw new ArgumentException("Неизвестный маршрут ИИ.");
+        if (settings.AiRoutingMode is not ("off" or "vpn" or "dns_ai" or "dns_vpn")) throw new ArgumentException("Неизвестный маршрут ИИ.");
+        if (settings.RoutingMode is not ("smart_ru" or "global")) throw new ArgumentException("Неизвестный основной маршрут.");
+        if (settings.RoutingMode == "global" && settings.AiRoutingMode != "dns_vpn") settings.AiRoutingMode = "vpn";
         if (data.TryGetProperty("glassTransparency", out var glass)) settings.GlassTransparency = double.Parse(glass.ToString(), System.Globalization.CultureInfo.InvariantCulture);
         Bool("glassBlurEnabled", v => settings.GlassBlurEnabled = v);
         Str("aiDnsProvider", v => settings.AiDnsProvider = v);
@@ -1009,6 +1078,7 @@ public partial class MainWindow : Window
             (data.TryGetProperty("enableAiBypass", out var aiEnabled) && aiEnabled.GetBoolean() != target.EnableAiBypass) ||
             (data.TryGetProperty("enableAiXboxDns", out var xboxEnabled) && xboxEnabled.GetBoolean() != target.EnableAiXboxDns)) _aiDnsCts?.Cancel();
         target.AiDnsProvider = settings.AiDnsProvider; target.AiTlsFragment = settings.AiTlsFragment; target.AdBlockAllowlist = settings.AdBlockAllowlist;
+        target.AiDnsAutoSwitch = settings.AiDnsAutoSwitch;
         var balancerChanged = target.BalancerMode != settings.BalancerMode || target.BalancerHealthSeconds != settings.BalancerHealthSeconds || target.BalancerFailureConfirmations != settings.BalancerFailureConfirmations || target.BalancerOptimizationMinutes != settings.BalancerOptimizationMinutes || target.BalancerCooldownSeconds != settings.BalancerCooldownSeconds || target.BalancerImprovementPercent != settings.BalancerImprovementPercent;
         target.BalancerHealthSeconds = settings.BalancerHealthSeconds;
         target.BalancerFailureConfirmations = settings.BalancerFailureConfirmations;
@@ -1020,11 +1090,16 @@ public partial class MainWindow : Window
         target.GlassBlurEnabled = settings.GlassBlurEnabled;
         target.GroupServers = settings.GroupServers;
 
-        target.EnableAiDns = settings.AiRoutingMode == "dns_ai"; target.AiRoutingMode = settings.AiRoutingMode;
+        target.EnableAiDns = settings.AiRoutingMode is "dns_ai" or "dns_vpn"; target.AiRoutingMode = settings.AiRoutingMode;
+        _viewModel.SelectedRoutingMode = settings.RoutingMode;
+        target.EnableAiBypass = settings.AiRoutingMode != "off"; target.EnableAiXboxDns = false;
+        target.SettingsSchemaVersion = Math.Max(2, target.SettingsSchemaVersion);
         target.CustomDohUrl = settings.CustomDohUrl; target.EnableAdBlock = settings.EnableAdBlock;
         target.CustomBlockRules = settings.CustomBlockRules; target.EnableMux = settings.EnableMux;
         target.MuxConcurrency = settings.MuxConcurrency; target.TlsFragmentLength = settings.TlsFragmentLength;
         target.TlsFragmentInterval = settings.TlsFragmentInterval; target.TlsFragmentPackets = settings.TlsFragmentPackets;
+        target.UpstreamProxyEnabled = settings.UpstreamProxyEnabled;
+        target.UpstreamProxyHost = settings.UpstreamProxyHost; target.UpstreamProxyPort = settings.UpstreamProxyPort;
         target.ShareLan = settings.ShareLan; target.StartMinimized = settings.StartMinimized;
         target.EnableGlobalHotkey = settings.EnableGlobalHotkey;
         if (data.TryGetProperty("subAutoUpdateInterval", out var interval)) _viewModel.SubAutoUpdateInterval = interval.GetString() ?? "24h";
@@ -1063,7 +1138,7 @@ public partial class MainWindow : Window
             _viewModel.ConfirmationRequested = null;
             _viewModel.Disconnect();
             _speedTestCts?.Cancel();
-            _aiDnsCts?.Cancel(); _adFilterLifetime.Cancel();
+            _aiDnsCts?.Cancel(); _aiCheckCts?.Cancel(); _adFilterLifetime.Cancel();
             try { _trafficHistory.Flush(); } catch { }
             _trayManager?.Dispose();
             _trayManager = null;

@@ -16,6 +16,7 @@ namespace SplateClientDesktop.Services;
 
 public static class PingService
 {
+    private static readonly SemaphoreSlim CandidateSlots = new(6, 6);
     private static readonly string[] TestEndpoints =
     [
         "https://cp.cloudflare.com/generate_204",
@@ -67,7 +68,7 @@ public static class PingService
         ServerNode? currentlyActiveNode = null,
         int timeoutMs = 4000,
         Action<ServerNode, long>? onSingleNodePinged = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default, HttpProxyEndpoint? upstream = null, int maxBatchSize = 6)
     {
         ct.ThrowIfCancellationRequested();
         if (nodes == null || nodes.Count == 0) return;
@@ -83,12 +84,12 @@ public static class PingService
 
         var route = await ProbeRoute.CaptureAsync(ct).ConfigureAwait(false);
         // Process in batches
-        const int batchSize = 10;
+        var batchSize = Math.Clamp(maxBatchSize, 1, 6);
         for (int i = 0; i < nodes.Count; i += batchSize)
         {
             if (ct.IsCancellationRequested) break;
             var batch = nodes.Skip(i).Take(batchSize).ToList();
-            await MeasureSingleBatchInternalAsync(batch, corePath, connectedHttpPort, currentlyActiveNode, timeoutMs, onSingleNodePinged, route, ct).ConfigureAwait(false);
+            await MeasureSingleBatchInternalAsync(batch, corePath, connectedHttpPort, currentlyActiveNode, timeoutMs, onSingleNodePinged, route, ct, upstream).ConfigureAwait(false);
         }
     }
 
@@ -100,7 +101,7 @@ public static class PingService
         int timeoutMs,
         Action<ServerNode, long>? onSingleNodePinged,
         ProbeRoute route,
-        CancellationToken ct)
+        CancellationToken ct, HttpProxyEndpoint? upstream)
     {
         route.Validate();
         var probeNodes = new List<(ServerNode Node, int Port)>();
@@ -123,7 +124,7 @@ public static class PingService
 
         if (probeNodes.Count == 0) return;
 
-        var configRoot = BuildProbeConfig(probeNodes, route.Uplink?.Name);
+        var configRoot = BuildProbeConfig(probeNodes, route.Uplink?.Name, upstream);
 
         var tempConfigPath = Path.Combine(Path.GetTempPath(), $"splate_probe_{Guid.NewGuid():N}.json");
         Process? probeProc = null;
@@ -181,9 +182,15 @@ public static class PingService
             // Measure each server through its designated local HTTP proxy inbound
             var tasks = probeNodes.Select(async item =>
             {
-                long latency = await MeasureHttpProxyLatencyAsync(item.Port, timeoutMs, ct).ConfigureAwait(false);
-                ct.ThrowIfCancellationRequested(); route.Validate();
-                onSingleNodePinged?.Invoke(item.Node, latency > 0 ? latency : 0);
+                // Queue time is outside the probe budget and never becomes a server error.
+                await CandidateSlots.WaitAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    long latency = await MeasureHttpProxyLatencyAsync(item.Port, timeoutMs, ct).ConfigureAwait(false);
+                    ct.ThrowIfCancellationRequested(); route.Validate();
+                    onSingleNodePinged?.Invoke(item.Node, latency > 0 ? latency : 0);
+                }
+                finally { CandidateSlots.Release(); }
             }).ToList();
 
             await Task.WhenAll(tasks).ConfigureAwait(false);
@@ -221,7 +228,7 @@ public static class PingService
         }
     }
 
-    internal static JsonObject BuildProbeConfig(IReadOnlyList<(ServerNode Node, int Port)> probeNodes, string? uplinkInterface)
+    internal static JsonObject BuildProbeConfig(IReadOnlyList<(ServerNode Node, int Port)> probeNodes, string? uplinkInterface, HttpProxyEndpoint? upstream = null)
     {
         var configRoot = new JsonObject
         {
@@ -269,6 +276,7 @@ public static class PingService
 
         configRoot["inbounds"] = inbounds;
         configRoot["dns"] = new JsonObject { ["hosts"] = hosts, ["servers"] = string.IsNullOrWhiteSpace(uplinkInterface) ? new JsonArray { "localhost" } : new JsonArray { "https://cloudflare-dns.com/dns-query", "https://dns.google/dns-query" }, ["enableParallelQuery"] = true, ["queryStrategy"] = string.IsNullOrWhiteSpace(uplinkInterface) ? "UseIP" : "UseIPv4", ["tag"] = "probe-dns" };
+        if (upstream != null) { foreach (var item in probeNodes) UpstreamProxy.ValidateTransport(item.Node); UpstreamProxy.Chain(outbounds, upstream, uplinkInterface); }
         configRoot["outbounds"] = outbounds;
         configRoot["routing"] = new JsonObject
         {

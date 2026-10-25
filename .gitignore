@@ -35,6 +35,14 @@ Desktop.ini
 /tests/artifacts/
 /tests/sandbox-*/
 /tests/SandboxChecks/Package/
+/tests/SandboxQA/runtime/
+/tests/SandboxQA/out/
+/tests/SandboxQA/checks/
+/tests/SandboxQA/candidate/
+/tests/SandboxQA/request.json
+/tests/SandboxQA/audit.wsb
+!/tests/SandboxQA/Bootstrap.ps1
+!/tests/SandboxQA/Start.ps1
 node_modules/
 *.spcfg
 *.db

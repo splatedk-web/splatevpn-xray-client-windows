@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 
 namespace SplateClientDesktop.Views;
 
@@ -12,6 +13,16 @@ public sealed class BackupPasswordWindow : Window
     {
         Title = exporting ? "Пароль резервной копии" : "Открыть резервную копию";
         Width = 420; SizeToContent = SizeToContent.Height; ResizeMode = ResizeMode.NoResize;
+        Background = new SolidColorBrush(Color.FromRgb(17, 24, 39));
+        Foreground = Brushes.White;
+        void StylePassword(PasswordBox box)
+        {
+            box.Height = 36; box.Padding = new Thickness(8);
+            box.Background = new SolidColorBrush(Color.FromRgb(36, 49, 72));
+            box.Foreground = Brushes.White;
+            box.BorderBrush = Brushes.SlateGray;
+        }
+        StylePassword(_password);
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         var panel = new StackPanel { Margin = new Thickness(24) };
         panel.Children.Add(new TextBlock { Text = exporting
@@ -22,13 +33,19 @@ public sealed class BackupPasswordWindow : Window
         if (exporting)
         {
             panel.Children.Add(new TextBlock { Text = "Повторите пароль", Margin = new Thickness(0, 12, 0, 4) });
-            confirmation = new PasswordBox(); panel.Children.Add(confirmation);
+            confirmation = new PasswordBox(); StylePassword(confirmation); panel.Children.Add(confirmation);
         }
-        var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 8) };
+        var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = Brushes.LightCoral, Margin = new Thickness(0, 8, 0, 8) };
         panel.Children.Add(error);
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
         var cancel = new Button { Content = "Отмена", IsCancel = true, Padding = new Thickness(12, 6, 12, 6) };
         var accept = new Button { Content = "Продолжить", IsDefault = true, Margin = new Thickness(8, 0, 0, 0), Padding = new Thickness(12, 6, 12, 6) };
+        foreach (var button in new[] { cancel, accept })
+        {
+            button.MinHeight = 36; button.MinWidth = 90;
+            button.Background = new SolidColorBrush(Color.FromRgb(36, 49, 72));
+            button.Foreground = Brushes.White;
+        }
         accept.Click += (_, _) =>
         {
             if (string.IsNullOrWhiteSpace(Passphrase) || (exporting && Passphrase.Length < 8))

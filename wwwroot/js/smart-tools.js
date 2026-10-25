@@ -24,16 +24,21 @@
   <label for="setAdBlockAllowlist">Исключения из блокировки рекламы</label><textarea id="setAdBlockAllowlist" class="rules-input desktop-setting" rows="4" placeholder="example.com&#10;разрешённый-домен.рф"></textarea>
   <p class="settings-help">До 100 доменов, по одному в строке. Исключение включает поддомены. Пользовательские правила блокировки сохраняют приоритет. Источник: AdGuard DNS filter · GPL-3.0; лицензия входит в сборку.</p>
  </div>`);
- const collect=window.SplateExtras.collectSettings;
+ let dnsBusy=false; const collect=window.SplateExtras.collectSettings;
  function syncAiMode(){
+  const global=$('setRoutingMode').value==='global';
+  if(global&&!['vpn','dns_vpn'].includes($('setAiMode').value))$('setAiMode').value='vpn';
+  $('setAiMode').disabled=false; for(const option of $('setAiMode').options)option.disabled=global&&!['vpn','dns_vpn'].includes(option.value);
+  $('setDirectRules').disabled=global;
   const mode=$('setAiMode').value;
-  $('setAiDns').checked=mode==='dns_ai';$('setAiProxy').checked=mode!=='off';$('setAiXboxDns').checked=false;
-  if(mode!=='off')$('setSniffing').checked=true;
-  document.querySelector('.smart-dns-tools').hidden=mode!=='dns_ai';$('btnQuickAiDns').hidden=mode!=='dns_ai';
-  $('aiModeHelp').textContent={off:'Для нейросетей действуют общие правила маршрутизации.',vpn:'AI-сервисы идут через выбранный VPN-сервер. Нужен сервер в поддерживаемом регионе.',dns_ai:'AI-домены идут напрямую через SmartDNS. Это отдельный маршрут: общий IP VPN не показывает адрес выхода Gemini. Доступ зависит от провайдера.'}[mode];
+  $('setAiDns').checked=['dns_ai','dns_vpn'].includes(mode);$('setAiProxy').checked=mode!=='off';$('setAiXboxDns').checked=false;
+  document.querySelector('.smart-dns-tools').hidden=!['dns_ai','dns_vpn'].includes(mode);$('btnQuickAiDns').hidden=mode!=='dns_ai'; $('setAiTlsFragment').closest('.setting-item').hidden=mode!=='dns_ai'; for(const id of ['btnSelectAiDns','btnCancelAiDns','aiDnsSelectionStatus','aiDnsSelectionResults'])$(id).hidden=mode!=='dns_ai'||(id==='btnCancelAiDns'&&!dnsBusy); if($('setAiDnsAutoSwitch'))$('setAiDnsAutoSwitch').closest('.setting-item').hidden=mode!=='dns_ai';
+  $('aiModeHelp').textContent={off:'Для нейросетей действуют общие правила маршрутизации.',vpn:'AI-сервисы идут через выбранный VPN-сервер. Нужен сервер в поддерживаемом регионе.',dns_vpn:'DNS и подключение к SmartDNS-реле идут через выбранный VPN. Конечный выход принадлежит SmartDNS. Провайдер выбирается вручную; прямой автоподбор и AI-фрагментация здесь не применяются.',dns_ai:'AI-домены идут напрямую через SmartDNS. Это отдельный маршрут: общий IP VPN не показывает адрес выхода Gemini. Доступ зависит от провайдера.'}[mode];
+  if(global&&mode==='vpn')$('aiModeHelp').textContent='Глобальный маршрут: нейросети и остальной интернет идут через VPN. SmartDNS и исключения «Всегда напрямую» отключены. Для их использования выберите Smart RU.';
  }
  $('setAiMode').addEventListener('change',syncAiMode);
- window.SplateExtras.collectSettings=()=>{syncAiMode();return {...collect(),enableAiDns:$('setAiMode').value==='dns_ai',aiDnsProvider:$('setAiDnsProvider').value,aiTlsFragment:$('setAiTlsFragment').checked,adBlockAllowlist:$('setAdBlockAllowlist').value};};
+ $('setRoutingMode').addEventListener('change',syncAiMode);
+ window.SplateExtras.collectSettings=()=>{syncAiMode();const mode=$('setAiMode').value;return {...collect(),aiRoutingMode:mode,enableAiDns:['dns_ai','dns_vpn'].includes(mode),enableAiBypass:mode!=='off',enableAiXboxDns:false,aiDnsProvider:$('setAiDnsProvider').value,aiTlsFragment:$('setAiTlsFragment').checked,adBlockAllowlist:$('setAdBlockAllowlist').value};};
  $('btnSelectAiDns').onclick=()=>send('selectAiDns');
  syncAiMode();
  $('btnCancelAiDns').onclick=()=>send('cancelAiDns');$('btnUpdateAdFilters').onclick=()=>send('updateAdFilters');
@@ -45,10 +50,10 @@
    $('setAiDnsProvider').replaceChildren(...p.map(v=>new Option(v.Label,v.Key)));$('setAiDnsProvider').value=selected;
    for(const v of p)if(!$('setDnsProvider').querySelector(`option[value="${v.Key}"]`))$('setDnsProvider').add(new Option(v.Label,v.Key));
   }
-  if(type==='extendedSettings'){$('setAiMode').value=p.EnableAiXboxDns?'dns_ai':!p.EnableAiBypass?'off':p.EnableAiDns&&p.AiRoutingMode==='dns_ai'?'dns_ai':'vpn';syncAiMode();$('setAiDnsProvider').value=p.AiDnsProvider||'dns_ai';$('setAiTlsFragment').checked=p.AiTlsFragment??false;$('setAdBlockAllowlist').value=p.AdBlockAllowlist||'';}
+  if(type==='extendedSettings'){$('setAiMode').value=['off','vpn','dns_ai','dns_vpn'].includes(p.AiRoutingMode)?p.AiRoutingMode:p.EnableAiXboxDns?'dns_ai':!p.EnableAiBypass?'off':p.EnableAiDns?'dns_ai':'vpn';syncAiMode();$('setAiDnsProvider').value=p.AiDnsProvider||'dns_ai';$('setAiTlsFragment').checked=p.AiTlsFragment??false;$('setAdBlockAllowlist').value=p.AdBlockAllowlist||'';}
   if(type==='adFilters')$('adFilterStatus').textContent=(p.Count?`${p.Count.toLocaleString('ru-RU')} доменов. `:'')+(p.Status||'')+(p.Updated?` Обновлено: ${new Date(p.Updated).toLocaleString('ru-RU')}`:'');
   if(type==='operation'&&p.operation==='updateAdFilters'){$('btnUpdateAdFilters').disabled=p.busy;if(p.busy)$('adFilterStatus').textContent='Загрузка и проверка фильтров…';}
-  if(type==='operation'&&p.operation==='selectAiDns'){$('btnSelectAiDns').disabled=p.busy;$('btnCancelAiDns').hidden=!p.busy;}
+  if(type==='operation'&&p.operation==='selectAiDns'){dnsBusy=p.busy;$('btnSelectAiDns').disabled=p.busy;$('btnCancelAiDns').hidden=!p.busy;}
   if(type==='aiDnsSelection'){
    const phase={testing:'Проверка',verifying:'Повторная проверка',applied:'Сохранено и применяется к соединению',no_match:'Для Gemini нет подтверждённого варианта. Настройки не изменены; проверьте ограничения в результатах',cancelled:'Подбор остановлен. Настройки не изменены',error:'Ошибка проверки'}[p.Phase]||p.Phase;
    const current=p.Current?` · ${providers.get(p.Current.ProviderKey)||p.Current.ProviderKey}, фрагментация ${p.Current.TlsFragment?'вкл.':'выкл.'}`:'';

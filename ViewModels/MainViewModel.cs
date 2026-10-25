@@ -35,12 +35,54 @@ public partial class MainViewModel : ObservableObject
     private readonly BalancerPolicy _balancerPolicy;
     private long _currentDownloadBps;
     private AppSettings? _activeSettings;
+    public bool HasPendingConnectionSettings => _activeSettings != null &&
+        ConnectionSettings.Signature(Settings) != ConnectionSettings.Signature(_activeSettings);
+
+    public async Task<string> GetConnectionDiagnosticAsync()
+    {
+        var epoch = _connectionEpoch;
+        var active = _activeSettings;
+        var lines = new List<string>
+        {
+            $"SplateVPN {typeof(MainViewModel).Assembly.GetName().Version}",
+            $"Состояние: {(IsConnecting ? "подключение" : IsConnected ? "подключено" : "отключено")}",
+            $"Ядро Xray: {(_xrayManager.IsRunning ? "работает" : "остановлено")}",
+            $"Системный туннель TUN: {(ActiveTunMode ? "работает" : "выключен; приложения должны использовать системный прокси")}",
+            $"Сохранённый маршрут: {Settings.RoutingMode}; нейросети: {Settings.AiRoutingMode}",
+            $"Активный маршрут: {active?.RoutingMode ?? "нет"}; нейросети: {active?.AiRoutingMode ?? "нет"}",
+            $"Настройки соединения: {(active == null ? "применятся при подключении" : HasPendingConnectionSettings ? "есть неприменённые изменения" : "применены")}",
+            $"DNS: {active?.DnsProvider ?? "нет активного соединения"}; sniffing: {(active?.EnableSniffing == true ? "включён" : "выключен")}",
+            $"Kill switch: {(active?.EnableKillSwitch == true ? "включён" : "выключен")}; защита DNS: {(active?.EnableDnsLeakProtection == true ? "включена" : "выключена")}",
+        };
+        if (active != null && IsConnected)
+        {
+            foreach (var endpoint in new[] { ("HTTP", active.HttpPort), ("SOCKS", active.SocksPort) })
+            {
+                using var client = new System.Net.Sockets.TcpClient();
+                using var timeout = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(2));
+                try { await client.ConnectAsync(System.Net.IPAddress.Loopback, endpoint.Item2, timeout.Token); lines.Add($"{endpoint.Item1} 127.0.0.1:{endpoint.Item2}: принимает соединения"); }
+                catch { lines.Add($"{endpoint.Item1} 127.0.0.1:{endpoint.Item2}: недоступен"); }
+            }
+        }
+        if (epoch != _connectionEpoch) lines.Add("Соединение изменилось во время проверки. Повторите диагностику.");
+        try
+        {
+            var proxy = _platform.ReadProxyStatus();
+            lines.Add($"Прокси Windows: ручной {(proxy.Manual ? "включён" : "выключен")}; PAC {(proxy.Pac ? "включён" : "выключен")}");
+            if (ActiveTunMode && proxy.HasConflict) lines.Add("КОНФЛИКТ: при активном TUN включён системный прокси/PAC. Проверьте параметры Windows или переподключитесь, чтобы отключить его с подтверждением.");
+        }
+        catch (Exception) { lines.Add("Не удалось проверить настройки системного прокси Windows."); }
+        lines.Add("Проверка портов подтверждает работу локального ядра. Для проверки выхода и доступа используйте «Проверить нейросети». Ссылки, ключи и адрес сервера в этот отчёт не включены.");
+        return string.Join("\n", lines);
+    }
     public int ActiveHttpPort => _activeSettings?.HttpPort ?? Settings.HttpPort;
     private int ActiveSocksPort => _activeSettings?.SocksPort ?? Settings.SocksPort;
     public bool ActiveTunMode => _platform.IsTunRunning;
     public bool ActiveAiXboxDns => _activeSettings?.EnableAiXboxDns == true;
-    public bool ActiveAiDns => _activeSettings is { EnableAiDns: true, EnableAiBypass: true, AiRoutingMode: "dns_ai" };
+    public bool ActiveAiDns => _activeSettings is { EnableAiDns: true, EnableAiBypass: true } && _activeSettings.AiRoutingMode is "dns_ai" or "dns_vpn";
     public string ActiveAiMode => _activeSettings?.AiRoutingMode ?? "off";
+    public string? ActiveRoutingMode => _activeSettings?.RoutingMode;
+    public string? ActiveRoutingRegion => _activeSettings?.RoutingRegion;
     public string ActiveAiDnsLabel => SmartDnsProviders.ForAi(_activeSettings?.AiDnsProvider ?? "dns_ai").Label;
     private readonly QrCodeScannerService _qrScanner = new();
     private DispatcherTimer? _sessionTimer;
@@ -400,6 +442,7 @@ public partial class MainViewModel : ObservableObject
 
     partial void OnSelectedRoutingModeChanged(string value)
     {
+        if (Settings.UpstreamProxyEnabled && value != "global") { SelectedRoutingMode = "global"; return; }
         OnPropertyChanged(nameof(IsSmartRouting));
         OnPropertyChanged(nameof(IsGlobalRouting));
         Settings.RoutingMode = value;
@@ -697,7 +740,7 @@ public partial class MainViewModel : ObservableObject
     {
         _enableBackgroundWork = enableBackgroundWork;
         _platform = platform ?? new WindowsConnectionPlatform();
-        _probes = probes ?? new ConnectionProbes();
+        _probes = probes ?? new ConnectionProbes(() => Settings);
         _balancerPolicy = balancerPolicy ?? new BalancerPolicy();
         _storage = storage;
         _xrayManager = xrayManager;
@@ -782,6 +825,7 @@ public partial class MainViewModel : ObservableObject
         var nodes = _storage.LoadServers();
         if (_storage is ServerStorage { LastLoadWarning: { } warning })
             NotifyUser(warning, "Каталог серверов", MessageBoxButton.OK, MessageBoxImage.Warning);
+        foreach (var node in nodes) if (node.Ping < 0) node.Ping = 0;
         Servers = new ObservableCollection<ServerNode>(nodes);
         SelectedServer = Servers.FirstOrDefault(s => s.IsSelected) ?? Servers.FirstOrDefault(IsServerEnabled);
 
@@ -1024,7 +1068,12 @@ public partial class MainViewModel : ObservableObject
             aiDnsProvider: settings.AiDnsProvider,
             aiTlsFragment: settings.AiTlsFragment,
             adBlockMatcher: adMatcher,
-            adBlockAllowlist: settings.AdBlockAllowlist
+            adBlockAllowlist: settings.AdBlockAllowlist,
+            upstreamProxyHost: settings.UpstreamProxyEnabled ? settings.UpstreamProxyHost : null,
+            upstreamProxyPort: settings.UpstreamProxyPort,
+            routingRegion: settings.RoutingRegion,
+            temporaryRoutes: settings.TemporaryRoutes,
+            lanBindAddress: settings.LanBindAddress, lanAuthEnabled: settings.LanAuthEnabled, lanUsername: settings.LanUsername, lanPassword: settings.LanPassword
         );
         if ((uplink != null || XrayConfigGenerator.ServerAddressAlias(node) != null) && !System.Net.IPAddress.TryParse(node.Address, out _))
         {
@@ -1051,6 +1100,7 @@ public partial class MainViewModel : ObservableObject
         var node = SelectedServer;
         var coreChanged = false;
         var attemptedSocksPort = previous?.Settings.SocksPort ?? Settings.SocksPort;
+        ProxyPreflight? tunProxyApproval = null;
         IsConnecting = true;
         ConnectionChanging?.Invoke();
         StatusText = previous != null ? "ПЕРЕКЛЮЧЕНИЕ..." : "ПОДКЛЮЧЕНИЕ...";
@@ -1061,11 +1111,31 @@ public partial class MainViewModel : ObservableObject
             if (node == null || !Servers.Contains(node) || !IsServerEnabled(node)) throw new InvalidOperationException("Выберите доступный сервер.");
             var settings = System.Text.Json.JsonSerializer.Deserialize<AppSettings>(System.Text.Json.JsonSerializer.Serialize(Settings))!;
             SettingsCompatibility.Normalize(settings);
+            ConnectionDetail = "Проверка настроек, портов и компонентов...";
+            _platform.CheckEnvironment(settings, _xrayManager.IsRunning && previous != null ? new[] { previous.Settings.HttpPort, previous.Settings.SocksPort } : Array.Empty<int>());
+            if (UpstreamProxy.FromSettings(settings) is { } upstream)
+            {
+                UpstreamProxy.ValidateTransport(node);
+                if ((upstream.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) || (System.Net.IPAddress.TryParse(upstream.Host, out var proxyAddress) && System.Net.IPAddress.IsLoopback(proxyAddress))) && (upstream.Port == settings.HttpPort || upstream.Port == settings.SocksPort))
+                    throw new IOException("Внешний прокси указывает на локальный порт самого SplateVPN. Импортируйте исходный прокси Windows или укажите адрес прокси сети.");
+                ConnectionDetail = "Проверка CONNECT через внешний HTTP-прокси...";
+                await UpstreamProxy.CheckConnectAsync(upstream, node.Address, node.Port, ct);
+            }
             attemptedSocksPort = settings.SocksPort;
             NetworkUplink? uplink = null;
             if (settings.EnableTunMode)
             {
                 if (!_platform.IsAdministrator) throw new InvalidOperationException("Для TUN запустите приложение от администратора.");
+                tunProxyApproval = _platform.InspectProxyForTun();
+                if (tunProxyApproval.HasConflict)
+                {
+                    ConnectionDetail = "Обнаружен конфликт системного прокси и TUN.";
+                    var kind = tunProxyApproval.Manual && tunProxyApproval.Pac ? "ручной прокси и PAC-скрипт" : tunProxyApproval.Pac ? "PAC-скрипт автоматической настройки" : "ручной системный прокси";
+                    var accepted = await ConfirmUserAsync($"В Windows включён {kind}. Приложения могут отправлять трафик в него вместо TUN, из-за чего интернет не работает.\n\nВременно отключить его на время TUN-сеанса? При отключении VPN прежние настройки восстановятся, если вы или другая программа не измените их. Отмена остановит подключение.", "Конфликт прокси и TUN").WaitAsync(ct);
+                    ct.ThrowIfCancellationRequested();
+                    if (!accepted) throw new OperationCanceledException("Подключение отменено: системный прокси не изменён.", ct);
+                }
+                ct.ThrowIfCancellationRequested();
                 uplink = await _platform.GetUplinkAsync(ct);
                 AppendLog($"[UPLINK] Физический интерфейс: {uplink.Name}; индекс {uplink.Index}; шлюз {uplink.Gateway}.");
             }
@@ -1082,9 +1152,10 @@ public partial class MainViewModel : ObservableObject
             // Readiness is local SOCKS availability. External HTTP diagnostics never gate connection startup.
             if (settings.EnableTunMode)
             {
-                if (!_platform.IsTunRunning || previous?.Settings.SocksPort != settings.SocksPort)
+                _platform.SuspendProxyForTun(tunProxyApproval!);
+                if (!_platform.IsTunRunning || previous?.Settings.SocksPort != settings.SocksPort || previous?.Settings.BlockIpv6 != settings.BlockIpv6)
                     if (!await _platform.StartTunAsync(settings.SocksPort, uplink!, settings.BlockIpv6, AppendLog, ct)) throw new IOException("Не удалось создать TUN.");
-                _platform.DisableProxy();
+                if (_platform.ReadProxyStatus().HasConflict) throw new IOException("После запуска TUN системный прокси снова включён другой программой. Отключите конфликтующий прокси/VPN и повторите подключение.");
             }
             else
             {
@@ -1109,6 +1180,7 @@ public partial class MainViewModel : ObservableObject
             TrayTooltipChanged?.Invoke("SplateVPN · Подключено");
             NotificationRequested?.Invoke(previous == null ? "VPN подключён" : "Сервер переключён", node.DisplayName);
             AppendLog($"[CONNECT] Готово: {node.DisplayName}; сеанс {epoch}.");
+            AppendLog("[PREFLIGHT] Компоненты и локальные порты проверены; " + (settings.EnableTunMode ? "TUN запущен без ручного прокси и PAC." : "системный прокси настроен на локальное ядро."));
             if (_enableBackgroundWork) _ = DetectEgressAndHealthAsync();
         }
         catch (Exception ex)
@@ -1128,9 +1200,11 @@ public partial class MainViewModel : ObservableObject
                     if (epoch != _connectionEpoch || !_connectionRequested) { DisconnectInternal(); return; }
                     if (previous.Settings.EnableTunMode)
                     {
+                        var restoreApproval = tunProxyApproval ?? _platform.InspectProxyForTun();
+                        if (tunProxyApproval == null && restoreApproval.HasConflict) throw new IOException("В Windows изменён прокси. Нельзя безопасно восстановить TUN без подтверждения.");
+                        _platform.SuspendProxyForTun(restoreApproval);
                         if (!_platform.IsTunRunning || attemptedSocksPort != previous.Settings.SocksPort)
                             if (!await _platform.StartTunAsync(previous.Settings.SocksPort, restoreUplink!, previous.Settings.BlockIpv6, AppendLog, System.Threading.CancellationToken.None)) throw new IOException("Не удалось восстановить TUN.");
-                        _platform.DisableProxy();
                     }
                     else { _platform.EnableProxy(previous.Settings.HttpPort, previous.Settings.SocksPort); if (_platform.IsTunRunning) _platform.StopTun(AppendLog); }
                     if (epoch != _connectionEpoch || !_connectionRequested) { DisconnectInternal(); return; }
@@ -1138,7 +1212,7 @@ public partial class MainViewModel : ObservableObject
                     SelectedServer = previous.Node;
                     if (restoredCore) _trafficMonitor.Resume(previous.MetricsPort);
                     IsConnected = true; StatusText = "ПОДКЛЮЧЕНО";
-                    ConnectionDetail = "Прежний сервер сохранён. Новый сервер не запустился.";
+                    ConnectionDetail = ex is OperationCanceledException ? "Изменение отменено. Прежнее соединение сохранено." : "Прежний сервер сохранён. Новый сервер не запустился.";
                     if (ex is not OperationCanceledException) _quality.Record(node?.Id ?? "", 0);
                     if (_enableBackgroundWork) StartHealthCheckTimer();
                     NotificationRequested?.Invoke("Смена сервера не завершена", "Соединение восстановлено на прежнем сервере.");
@@ -1390,7 +1464,25 @@ public partial class MainViewModel : ObservableObject
 
     private readonly System.Threading.SemaphoreSlim _subscriptionLock = new(1, 1);
     public event Action? SubscriptionsUpdated;
-    public bool IsServerEnabled(ServerNode node) => string.IsNullOrEmpty(node.SubscriptionId) || Subscriptions.FirstOrDefault(s => s.Id == node.SubscriptionId)?.Enabled != false;
+    public bool IsServerEnabled(ServerNode node) => string.IsNullOrEmpty(node.SubscriptionId) || node.SubscriptionId is "custom" or "builtin"
+        ? Settings.PersonalServersEnabled : Subscriptions.FirstOrDefault(s => s.Id == node.SubscriptionId)?.Enabled != false;
+    public void SetPersonalServersEnabled(bool enabled)
+    {
+        var target = System.Text.Json.JsonSerializer.Deserialize<AppSettings>(System.Text.Json.JsonSerializer.Serialize(Settings))!;
+        target.PersonalServersEnabled = enabled; CommitProfileSettings(target);
+        if (SelectedServer != null && !IsServerEnabled(SelectedServer))
+        { if (IsConnected || IsConnecting) Disconnect(); SelectedServer = Servers.FirstOrDefault(IsServerEnabled); }
+        ApplyServerFilters(); ServersBulkUpdated?.Invoke();
+    }
+    private readonly Dictionary<string, CancellationTokenSource> _subscriptionDownloads = new();
+    public void CancelSubscriptionUpdate(string id) { if (_subscriptionDownloads.TryGetValue(id, out var cancellation)) cancellation.Cancel(); }
+    private void RecordSubscriptionUpdate(SubscriptionItem sub, int before, string result, string? error = null)
+    {
+        Settings.SubscriptionUpdateHistory ??= new();
+        Settings.SubscriptionUpdateHistory.Add(new(DateTimeOffset.UtcNow, sub.Id, sub.Name, before, sub.NodeCount, result, error));
+        Settings.SubscriptionUpdateHistory = Settings.SubscriptionUpdateHistory.TakeLast(100).ToList();
+        try { _storage.SaveSettings(Settings); } catch (Exception ex) { AppendLog("[SUBSCRIPTION] Не удалось сохранить историю: " + ex.Message); }
+    }
 
     public void SetSubscriptionOptions(SubscriptionItem sub, bool? enabled, bool? autoUpdate)
     {
@@ -1436,6 +1528,9 @@ public partial class MainViewModel : ObservableObject
         if (sub == null || string.IsNullOrWhiteSpace(sub.Url)) return;
         await _subscriptionLock.WaitAsync();
         if (!Subscriptions.Contains(sub)) { _subscriptionLock.Release(); return; }
+        using var download = new CancellationTokenSource();
+        _subscriptionDownloads[sub.Id] = download;
+        var beforeCount = sub.NodeCount;
         sub.IsUpdating = true;
         _isUpdatingSubscription = true;
         SubscriptionsUpdated?.Invoke();
@@ -1446,19 +1541,21 @@ public partial class MainViewModel : ObservableObject
             SubscriptionResult subResult;
             try
             {
-                subResult = await SubscriptionService.FetchSubscriptionAsync(sub.Url, AppendLog, IsConnected ? ActiveHttpPort : null);
+                subResult = await SubscriptionService.FetchSubscriptionAsync(sub.Url, AppendLog, IsConnected ? ActiveHttpPort : null, download.Token);
                 if (subResult.Nodes.Count == 0) throw new InvalidOperationException("Источник не содержит серверов.");
             }
-            catch when (!string.IsNullOrWhiteSpace(sub.FallbackUrl))
+            catch when (!download.IsCancellationRequested && !string.IsNullOrWhiteSpace(sub.FallbackUrl))
             {
                 AppendLog("[SUBSCRIPTION] Загружаем резервный источник.");
-                subResult = await SubscriptionService.FetchSubscriptionAsync(sub.FallbackUrl, AppendLog, IsConnected ? ActiveHttpPort : null);
+                subResult = await SubscriptionService.FetchSubscriptionAsync(sub.FallbackUrl, AppendLog, IsConnected ? ActiveHttpPort : null, download.Token);
             }
+            download.Token.ThrowIfCancellationRequested();
             var newNodes = subResult.Nodes;
             if (!Subscriptions.Contains(sub)) return; // Removed while the download was in flight.
 
             if (newNodes.Count == 0)
             {
+                RecordSubscriptionUpdate(sub, beforeCount, "error", "Источник не содержит серверов.");
                 AppendLog($"[SUBSCRIPTION WARNING] В подписке «{sub.Name}» не обнаружено серверов.");
                 if (notify) NotifyUser($"В подписке «{sub.Name}» не найдено серверов. Проверьте правильность ссылки.", "Внимание", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
@@ -1510,16 +1607,21 @@ public partial class MainViewModel : ObservableObject
             }
             if (SelectedServer == null) SelectedServer = Servers.FirstOrDefault(IsServerEnabled);
 
+            RecordSubscriptionUpdate(sub, beforeCount, "success");
             AppendLog($"[SUBSCRIPTION] «{sub.Name}»: успешно обновлено, узлов: {newNodes.Count}");
             if (notify) NotificationRequested?.Invoke("Подписка обновлена", $"«{sub.Name}»: загружено {newNodes.Count} узлов.");
         }
+        catch (OperationCanceledException) when (download.IsCancellationRequested)
+        { RecordSubscriptionUpdate(sub, beforeCount, "cancelled"); AppendLog("[SUBSCRIPTION] Обновление отменено."); }
         catch (Exception ex)
         {
+            RecordSubscriptionUpdate(sub, beforeCount, "error", DiagnosticRedactor.Redact(ex.Message, new[] { sub.Url, sub.FallbackUrl }));
             AppendLog($"[SUBSCRIPTION ERROR] {ex.Message}");
             if (notify) NotifyUser($"Ошибка обновления подписки «{sub.Name}»:\n{ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
+            _subscriptionDownloads.Remove(sub.Id);
             sub.IsUpdating = false;
             _isUpdatingSubscription = false;
             _subscriptionLock.Release();
@@ -1742,7 +1844,7 @@ public partial class MainViewModel : ObservableObject
         IsPinging = true;
         var nodes = Servers.Where(IsServerEnabled).ToList();
         var results = new System.Collections.Concurrent.ConcurrentDictionary<ServerNode, long>();
-        var http = PingMode == "http";
+        var http = PingMode == "http" || Settings.UpstreamProxyEnabled;
         using var cancellation = new System.Threading.CancellationTokenSource();
         _pingCancellation = cancellation;
         var token = cancellation.Token;
@@ -1764,11 +1866,11 @@ public partial class MainViewModel : ObservableObject
         {
             PingProgressUpdated?.Invoke(0, nodes.Count, true);
             AppendLog($"[PING] {(http ? "HTTPS" : "TCP")}: {nodes.Count} узлов.");
-            if (http) await _probes.CandidatesAsync(nodes, Report, token);
+            if (http) await _probes.CandidatesAsync(nodes, Report, token, IsConnected ? 4 : 6);
             else
             {
                 var route = await ProbeRoute.CaptureAsync(token);
-                using var limit = new System.Threading.SemaphoreSlim(8);
+                using var limit = new System.Threading.SemaphoreSlim(IsConnected ? 4 : 6);
                 await Task.WhenAll(nodes.Select(async node => { await limit.WaitAsync(token); try { var delay = await PingService.MeasureTcpOnRouteAsync(node.Address, node.Port, 3000, route, token); route.Validate(); Report(node, delay); } finally { limit.Release(); } }));
                 route.Validate();
             }
@@ -1800,7 +1902,9 @@ public partial class MainViewModel : ObservableObject
             var corePath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "core", "xray.exe");
             int? connectedPort = (IsConnected && SelectedServer == node) ? ActiveHttpPort : null;
 
-            long latency = PingMode == "tcp" ? await PingService.MeasureTcpLatencyAsync(node.Address, node.Port, 3000) : await PingService.MeasureRealPingSingleAsync(node, corePath, connectedPort, 3500);
+            long latency;
+            if (Settings.UpstreamProxyEnabled) { long measured = 0; await _probes.CandidatesAsync(new[] { node }, (_, value) => measured = value, CancellationToken.None); latency = measured; }
+            else latency = PingMode == "tcp" ? await PingService.MeasureTcpLatencyAsync(node.Address, node.Port, 3000) : await PingService.MeasureRealPingSingleAsync(node, corePath, connectedPort, 3500);
             node.Ping = latency > 0 ? latency : -1;
             await _storage.SaveServersAsync(Servers.ToList());
             Application.Current?.Dispatcher?.InvokeAsync(() => ServerPingUpdated?.Invoke(node));
@@ -2053,7 +2157,9 @@ public partial class MainViewModel : ObservableObject
                 if (password.ShowDialog() != true) return;
                 passphrase = password.Passphrase;
             }
-            await _configService.ImportAsync(dlg.FileName, passphrase);
+            var mode = new BackupRestoreWindow { Owner = Application.Current?.MainWindow };
+            if (mode.ShowDialog() != true) return;
+            await _configService.ImportAsync(dlg.FileName, passphrase, mode.Merge);
             Disconnect();
             LoadData();
             NotifyUser("Конфигурация импортирована!", "Импорт", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -2099,7 +2205,9 @@ public partial class MainViewModel : ObservableObject
         try
         {
             var coreDir = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "core");
-            var ok = await GeoAssetUpdaterService.UpdateGeoAssetsAsync(coreDir, AppendLog);
+            using var handler = new System.Net.Http.HttpClientHandler { UseProxy = IsConnected, Proxy = IsConnected ? new System.Net.WebProxy($"http://127.0.0.1:{ActiveHttpPort}") : null };
+            using var client = new System.Net.Http.HttpClient(handler) { Timeout = TimeSpan.FromMinutes(2) };
+            var ok = await GeoAssetUpdaterService.UpdateGeoAssetsAsync(coreDir, AppendLog, client);
             if (ok)
             {
                 NotificationRequested?.Invoke("SplateVPN Базы обновлены", "Геобазы geoip.dat и geosite.dat успешно обновлены.");
@@ -2219,7 +2327,10 @@ public partial class MainViewModel : ObservableObject
                 enableTun: Settings.EnableTunMode,
                 perAppProxyList: Settings.PerAppProxyList,
                 perAppDirectList: Settings.PerAppDirectList,
-                enableAiXboxDns: Settings.EnableAiXboxDns
+                enableAiXboxDns: Settings.EnableAiXboxDns,
+                routingRegion: Settings.RoutingRegion,
+                temporaryRoutes: Settings.TemporaryRoutes,
+                lanBindAddress: Settings.LanBindAddress, lanAuthEnabled: Settings.LanAuthEnabled, lanUsername: Settings.LanUsername, lanPassword: Settings.LanPassword
             );
             System.IO.File.WriteAllText(configPath, configJson);
         }
@@ -2304,17 +2415,19 @@ public partial class MainViewModel : ObservableObject
         catch { }
     }
 
-    public async Task<string> CheckAiConnectivityAsync()
+    public async Task<string> CheckAiConnectivityAsync(System.Threading.CancellationToken cancellationToken = default)
     {
         if (!IsConnected) return "Сначала подключитесь к VPN.";
         var epoch = _connectionEpoch;
         var mode = ActiveTunMode ? "TUN" : "Системный прокси (приложения могут игнорировать его)";
-        var aiRoute = ActiveAiDns ? $"SmartDNS · {SmartDnsProviders.ForAi(_activeSettings!.AiDnsProvider).Label}, напрямую" : _activeSettings?.EnableAiBypass == true ? "выбранный VPN-сервер" : "общие правила маршрутизации";
-        var ipTask = IpLocationService.FetchEgressIpAsync(ActiveSocksPort, 5000);
-        var token = _connectCts?.Token ?? System.Threading.CancellationToken.None;
+        var aiRoute = ActiveAiDns ? $"SmartDNS · {ActiveAiDnsLabel}, {(ActiveAiMode == "dns_vpn" ? "через VPN" : "напрямую")}" : _activeSettings?.EnableAiBypass == true ? "выбранный VPN-сервер" : "общие правила маршрутизации";
+        using var linked = System.Threading.CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _connectCts?.Token ?? System.Threading.CancellationToken.None);
+        var token = linked.Token;
+        var ipTask = IpLocationService.FetchEgressIpAsync(ActiveSocksPort, 5000, token);
         var renderedTask = GeminiPageVerifier.CheckAsync(ActiveSocksPort, token);
         var targetsTask = AiServiceProbe.CheckAsync(ActiveSocksPort, token);
-        await Task.WhenAll(targetsTask, renderedTask);
+        await Task.WhenAll(targetsTask, renderedTask, ipTask);
+        token.ThrowIfCancellationRequested();
         var targets = await targetsTask;
         var rendered = await renderedTask;
         if (rendered.Outcome != AiDnsOutcome.Failed || targets[0].Outcome == AiDnsOutcome.Accessible) targets[0] = rendered;

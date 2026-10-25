@@ -54,20 +54,27 @@ public class XrayConfigGenerator
         string aiDnsProvider = "dns_ai",
         bool aiTlsFragment = false,
         string? adBlockMatcher = null,
-        string adBlockAllowlist = "")
+        string adBlockAllowlist = "", string? upstreamProxyHost = null, int upstreamProxyPort = 3128, string routingRegion = "ru", IEnumerable<TemporaryRoute>? temporaryRoutes = null, string lanBindAddress = "", bool lanAuthEnabled = false, string lanUsername = "splate", string lanPassword = "")
     {
+        if (!RoutingRegions.IsValid(routingRegion)) throw new ArgumentException("Неизвестный регион маршрутизации.");
+        LanSharing.Validate(new AppSettings { ShareLan = shareLan, LanBindAddress = lanBindAddress, LanAuthEnabled = lanAuthEnabled, LanUsername = lanUsername, LanPassword = lanPassword });
+        var separateLan = shareLan && !string.IsNullOrEmpty(lanBindAddress);
+        var upstream = string.IsNullOrWhiteSpace(upstreamProxyHost) ? null : UpstreamProxy.Validate(upstreamProxyHost, upstreamProxyPort);
+        if (upstream != null) { mode = "global"; if (node != null) UpstreamProxy.ValidateTransport(node); }
+        var regionalRouting = mode == "smart_ru" && routingRegion != "global";
         if (socksPort == httpPort || socksPort is < 1 or > 65535 || httpPort is < 1 or > 65535)
             throw new ArgumentException("HTTP и SOCKS: укажите разные порты от 1 до 65535.");
         // Old desktop profiles may contain Android-only options. Keep the stored lists,
         // but never emit unsupported process rules or an unusable FakeDNS configuration.
-        var modernAiDns = enableAiDns && enableAiBypass && aiRoutingMode == "dns_ai";
+        if (mode == "global" && aiRoutingMode != "dns_vpn")
+        { enableAiDns = false; enableAiXboxDns = false; enableAiBypass = true; aiRoutingMode = "vpn"; }
+        var modernAiDns = enableAiDns && enableAiBypass && aiRoutingMode is "dns_ai" or "dns_vpn";
+        var smartDnsViaVpn = modernAiDns && aiRoutingMode == "dns_vpn";
         var selectedSmartDns = SmartDnsProviders.ForAi(aiDnsProvider);
         var generalSmartDns = SmartDnsProviders.Find(dnsProvider);
         var aiDnsUrl = modernAiDns ? selectedSmartDns.DohUrl : "https://xbox-dns.ru/dns-query";
         var aiDomains = modernAiDns ? SmartDnsProviders.AiDomains : XboxAiDomains;
         enableAiXboxDns = enableAiXboxDns || modernAiDns;
-        if (enableAiXboxDns) enableSniffing = true;
-        if (enableAdBlock) enableSniffing = true;
         if (muxConcurrency is < 1 or > 128) throw new ArgumentException("Mux: параллельность от 1 до 128.");
         if (!ValidRange(tlsFragmentLength, 1, 65535) || !ValidRange(tlsFragmentInterval, 0, 10000) ||
             !(tlsFragmentPackets == "tlshello" || ValidRange(tlsFragmentPackets, 1, 100)))
@@ -101,39 +108,15 @@ public class XrayConfigGenerator
         if (isFakeDns) servers.Add("fakedns");
 
         // Split-DNS: Local Yandex DNS for RU domains (TCP 53 prevents UDP transaction ID loss)
-        var ruDomains = new JsonArray
-        {
-            "geosite:category-ru",
-            "geosite:tld-ru",
-            "geosite:yandex",
-            "geosite:vk",
-            "geosite:mailru",
-            "domain:gosuslugi.ru",
-            "domain:sberbank.ru",
-            "domain:tinkoff.ru",
-            "domain:vtb.ru",
-            "domain:alfabank.ru",
-            "domain:raiffeisen.ru",
-            "domain:gazprombank.ru",
-            "domain:mos.ru",
-            "domain:nalog.ru",
-            "domain:ru",
-            "domain:su",
-            "domain:xn--p1ai"
-        };
-        if (!string.IsNullOrWhiteSpace(node?.Address) && !System.Net.IPAddress.TryParse(node.Address, out _))
-        {
-            ruDomains.Add($"domain:{node.Address.Trim()}");
-        }
-
+        var ruDomains = RoutingRegions.Domains(routingRegion);
         var ruDns = new JsonObject
         {
-            ["address"] = "tcp://77.88.8.8:53",
+            ["address"] = $"tcp://{RoutingRegions.Dns(routingRegion)}:53",
             ["port"] = 53,
             ["skipFallback"] = true,
             ["domains"] = ruDomains
         };
-        if (mode == "smart_ru") servers.Add(ruDns);
+        if (regionalRouting) servers.Add(ruDns);
 
         if (enableAiXboxDns)
             servers.Add(new JsonObject
@@ -209,7 +192,7 @@ public class XrayConfigGenerator
             ["tag"] = "socks-in",
             ["protocol"] = "socks",
             ["port"] = socksPort,
-            ["listen"] = shareLan ? "0.0.0.0" : "127.0.0.1",
+            ["listen"] = shareLan && !separateLan ? "0.0.0.0" : "127.0.0.1",
             ["settings"] = new JsonObject
             {
                 ["auth"] = "noauth",
@@ -229,7 +212,7 @@ public class XrayConfigGenerator
                 ["enabled"] = true,
                 ["destOverride"] = socksDest,
                 ["metadataOnly"] = false,
-                ["routeOnly"] = (isFakeDns || enableAiXboxDns) ? false : routeOnlySniffing
+                ["routeOnly"] = (isFakeDns || enableAiXboxDns || enableAiBypass) ? false : routeOnlySniffing
             };
         }
         inbounds.Add(socksIn);
@@ -240,7 +223,7 @@ public class XrayConfigGenerator
             ["tag"] = "http-in",
             ["protocol"] = "http",
             ["port"] = httpPort,
-            ["listen"] = shareLan ? "0.0.0.0" : "127.0.0.1",
+            ["listen"] = shareLan && !separateLan ? "0.0.0.0" : "127.0.0.1",
             ["settings"] = new JsonObject
             {
                 ["allowTransparent"] = false
@@ -259,11 +242,25 @@ public class XrayConfigGenerator
                 ["enabled"] = true,
                 ["destOverride"] = httpDest,
                 ["metadataOnly"] = false,
-                ["routeOnly"] = (isFakeDns || enableAiXboxDns) ? false : routeOnlySniffing
+                ["routeOnly"] = (isFakeDns || enableAiXboxDns || enableAiBypass) ? false : routeOnlySniffing
             };
         }
         inbounds.Add(httpIn);
 
+        if (separateLan)
+        {
+            // Local clients and TUN keep their unauthenticated loopback endpoints.
+            // LAN endpoints bind to the chosen address and never follow another interface.
+            var lanSocks = socksIn.DeepClone(); lanSocks["tag"] = "socks-lan"; lanSocks["listen"] = lanBindAddress;
+            var lanHttp = httpIn.DeepClone(); lanHttp["tag"] = "http-lan"; lanHttp["listen"] = lanBindAddress;
+            if (lanAuthEnabled)
+            {
+                var accounts = new JsonArray { new JsonObject { ["user"] = lanUsername, ["pass"] = lanPassword } };
+                lanSocks["settings"]!["auth"] = "password"; lanSocks["settings"]!["accounts"] = accounts.DeepClone();
+                lanHttp["settings"]!["accounts"] = accounts.DeepClone();
+            }
+            inbounds.Add(lanSocks); inbounds.Add(lanHttp);
+        }
         root["inbounds"] = inbounds;
 
         // 4. Outbounds
@@ -319,11 +316,12 @@ public class XrayConfigGenerator
         {
             var aiSockopt = directSockopt.DeepClone().AsObject();
             aiSockopt["domainStrategy"] = "ForceIPv4";
+            if (smartDnsViaVpn) { aiSockopt = new JsonObject { ["domainStrategy"] = "ForceIPv4", ["dialerProxy"] = "proxy" }; }
             outbounds.Add(new JsonObject
             {
                 ["tag"] = "ai-smartdns",
                 ["protocol"] = "freedom",
-                ["settings"] = modernAiDns && aiTlsFragment ? new JsonObject { ["fragment"] = new JsonObject { ["packets"] = "tlshello", ["length"] = "10-20", ["interval"] = "1-2" } } : new JsonObject(),
+                ["settings"] = modernAiDns && aiTlsFragment && !smartDnsViaVpn ? new JsonObject { ["fragment"] = new JsonObject { ["packets"] = "tlshello", ["length"] = "10-20", ["interval"] = "1-2" } } : new JsonObject(),
                 ["streamSettings"] = new JsonObject { ["sockopt"] = aiSockopt }
             });
         }
@@ -351,6 +349,7 @@ public class XrayConfigGenerator
         {
             foreach (var outbound in outbounds.OfType<JsonObject>())
             {
+                if (smartDnsViaVpn && outbound["tag"]?.GetValue<string>() == "ai-smartdns") continue;
                 if (outbound["protocol"]?.GetValue<string>() is not ("freedom" or "vless" or "vmess" or "trojan" or "shadowsocks")) continue;
                 var stream = outbound["streamSettings"] as JsonObject ?? new JsonObject();
                 if (outbound["streamSettings"] == null) outbound["streamSettings"] = stream;
@@ -360,20 +359,21 @@ public class XrayConfigGenerator
                 if (outbound["tag"]?.GetValue<string>() != "ai-smartdns") opt["domainStrategy"] = "UseIPv4";
             }
         }
+        if (upstream != null) UpstreamProxy.Chain(outbounds, upstream, uplinkInterface);
         root["outbounds"] = outbounds;
 
         // 5. Routing Rules
         var rules = new JsonArray();
         if (enableAdBlock) rules.Add(AdFilterService.BlockRule(adBlockMatcher, adBlockAllowlist));
-        if (generalSmartDns != null) rules.Add(new JsonObject { ["type"] = "field", ["inboundTag"] = new JsonArray { "dns-ai-provider" }, ["outboundTag"] = "direct" });
+        if (generalSmartDns != null) rules.Add(new JsonObject { ["type"] = "field", ["inboundTag"] = new JsonArray { "dns-ai-provider" }, ["outboundTag"] = mode == "global" ? "proxy" : "direct" });
         if (enableAiXboxDns)
-            rules.Add(new JsonObject { ["type"] = "field", ["inboundTag"] = new JsonArray { "dns-xbox" }, ["outboundTag"] = "direct" });
-        if (mode == "smart_ru")
+            rules.Add(new JsonObject { ["type"] = "field", ["inboundTag"] = new JsonArray { "dns-xbox" }, ["outboundTag"] = smartDnsViaVpn ? "proxy" : "direct" });
+        if (regionalRouting)
             rules.Add(new JsonObject
             {
                 ["type"] = "field",
                 ["inboundTag"] = new JsonArray { "dns-query" },
-                ["ip"] = new JsonArray { "77.88.8.8" },
+                ["ip"] = new JsonArray { RoutingRegions.Dns(routingRegion) },
                 ["outboundTag"] = "direct"
             });
         rules.Add(new JsonObject { ["type"] = "field", ["inboundTag"] = new JsonArray { "dns-query" }, ["outboundTag"] = "proxy" });
@@ -382,7 +382,7 @@ public class XrayConfigGenerator
         rules.Add(new JsonObject
         {
             ["type"] = "field",
-            ["inboundTag"] = new JsonArray { "socks-in", "http-in" },
+            ["inboundTag"] = new JsonArray { "socks-in", "http-in", "socks-lan", "http-lan" },
             ["port"] = "53",
             ["outboundTag"] = "dns-out"
         });
@@ -416,7 +416,7 @@ public class XrayConfigGenerator
             ["type"] = "field",
             ["network"] = "udp",
             ["port"] = "123",
-            ["outboundTag"] = "direct"
+            ["outboundTag"] = mode == "global" ? "proxy" : "direct"
         });
 
         // 5.5 Per-App Routing (Process / Application based)
@@ -431,7 +431,14 @@ public class XrayConfigGenerator
             ["domain"] = new JsonArray { "domain:cp.cloudflare.com", "domain:speed.cloudflare.com", "domain:cachefly.net", "full:ipwho.is", "full:api.ip.sb", "full:ipinfo.io", "full:connectivitycheck.gstatic.com", "full:www.msftconnecttest.com" },
             ["outboundTag"] = "proxy"
         });
+        foreach (var rule in (temporaryRoutes ?? Array.Empty<TemporaryRoute>()).Where(r => r.ExpiresAt > DateTimeOffset.UtcNow))
+        {
+            if (rule.Route is not ("proxy" or "direct" or "block")) throw new ArgumentException("Неизвестный маршрут сайта.");
+            rules.Add(new JsonObject { ["type"] = "field", ["outboundTag"] = rule.Route,
+                ["domain"] = new JsonArray { "domain:" + SiteRules.Domain(rule.Domain) } });
+        }
         AddCustomRoutingRules(rules, customBlockRules, "block");
+        AddCustomRoutingRules(rules, customProxyRules, "proxy");
         if (enableAiXboxDns)
             rules.Add(new JsonObject
             {
@@ -439,10 +446,6 @@ public class XrayConfigGenerator
                 ["outboundTag"] = "ai-smartdns",
                 ["domain"] = new JsonArray(aiDomains.Select(d => JsonValue.Create(d)).ToArray())
             });
-
-        // 5.6 User Custom Rules (Always Proxy / Always Direct)
-        AddCustomRoutingRules(rules, customProxyRules, "proxy");
-        AddCustomRoutingRules(rules, customDirectRules, "direct");
 
         if (enableAiBypass)
         {
@@ -483,42 +486,15 @@ public class XrayConfigGenerator
             });
         }
 
+        // Explicit VPN/AI routes must win over broad direct exceptions.
+        if (mode != "global") AddCustomRoutingRules(rules, customDirectRules, "direct");
         if (mode == "smart_ru")
         {
-            // Direct RU Domains
-            rules.Add(new JsonObject
+            if (regionalRouting)
             {
-                ["type"] = "field",
-                ["outboundTag"] = "direct",
-                ["domain"] = new JsonArray
-                {
-                    "geosite:category-ru",
-                    "geosite:tld-ru",
-                    "geosite:yandex",
-                    "geosite:vk",
-                    "geosite:mailru",
-                    "domain:gosuslugi.ru",
-                    "domain:sberbank.ru",
-                    "domain:tinkoff.ru",
-                    "domain:vtb.ru",
-                    "domain:alfabank.ru",
-                    "domain:raiffeisen.ru",
-                    "domain:gazprombank.ru",
-                    "domain:mos.ru",
-                    "domain:nalog.ru",
-                    "domain:ru",
-                    "domain:su",
-                    "domain:xn--p1ai"
-                }
-            });
-
-            // Direct RU IPs & Private IPs
-            rules.Add(new JsonObject
-            {
-                ["type"] = "field",
-                ["outboundTag"] = "direct",
-                ["ip"] = new JsonArray { "geoip:ru", "geoip:private" }
-            });
+                rules.Add(new JsonObject { ["type"] = "field", ["outboundTag"] = "direct", ["domain"] = RoutingRegions.Domains(routingRegion) });
+                rules.Add(new JsonObject { ["type"] = "field", ["outboundTag"] = "direct", ["ip"] = new JsonArray { $"geoip:{routingRegion}", "geoip:private" } });
+            }
 
             // Fast path for popular foreign / CDN / measurement domains to proxy (bypasses RU IP DNS check)
             rules.Add(new JsonObject

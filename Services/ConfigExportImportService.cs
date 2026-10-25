@@ -28,8 +28,12 @@ public class ConfigExportImportService : IConfigExportImportService
         await File.WriteAllBytesAsync(filePath, encrypted);
     }
 
-    public async Task ImportAsync(string filePath, string passphrase)
+    public Task ImportAsync(string filePath, string passphrase) => ImportAsync(filePath, passphrase, false);
+
+    public async Task ImportAsync(string filePath, string passphrase, bool merge)
     {
+        if (new FileInfo(filePath).Length > 32 * 1024 * 1024)
+            throw new InvalidDataException("Резервная копия превышает 32 МБ.");
         var encrypted = await File.ReadAllBytesAsync(filePath);
         var json = Decrypt(encrypted, passphrase);
         using var document = JsonDocument.Parse(json);
@@ -40,13 +44,21 @@ public class ConfigExportImportService : IConfigExportImportService
             throw new InvalidDataException("Файл не содержит полной резервной копии SplateVPN.");
         var payload = JsonSerializer.Deserialize<ConfigPayload>(json)
             ?? throw new InvalidDataException("Не удалось прочитать резервную копию.");
-        if (payload.Servers.Any(n => n == null || string.IsNullOrWhiteSpace(n.Address) || n.Port is < 1 or > 65535) ||
+        if (payload.Servers == null || payload.Subscriptions == null || payload.Settings == null ||
+            payload.Servers.Any(n => n == null || string.IsNullOrWhiteSpace(n.Id) || string.IsNullOrWhiteSpace(n.Address) || n.Port is < 1 or > 65535) ||
             payload.Subscriptions.Any(s => s == null) || payload.Settings.HttpPort is < 1 or > 65535 ||
             payload.Settings.SocksPort is < 1 or > 65535 || payload.Settings.HttpPort == payload.Settings.SocksPort)
             throw new InvalidDataException("В резервной копии некорректные серверы или порты.");
         try { payload.Settings.AdBlockAllowlist = string.Join('\n', AdFilterService.Allowlist(payload.Settings.AdBlockAllowlist)); }
         catch (ArgumentException error) { throw new InvalidDataException("Некорректные исключения блокировщика в резервной копии.", error); }
         SettingsCompatibility.Normalize(payload.Settings);
+        if (merge)
+        {
+            // Existing entries and preferences win. Imported subscription IDs must remain stable.
+            payload.Servers = _storage.LoadServers().Concat(payload.Servers).DistinctBy(n => n.Id).ToList();
+            payload.Subscriptions = _storage.LoadSubscriptions().Concat(payload.Subscriptions).DistinctBy(s => s.Id).ToList();
+            payload.Settings = _storage.LoadSettings();
+        }
         _storage.SaveBackup(payload.Servers, payload.Subscriptions, payload.Settings);
     }
 
@@ -81,6 +93,8 @@ public class ConfigExportImportService : IConfigExportImportService
     {
         try
         {
+            var text = Encoding.UTF8.GetString(data).TrimStart('\uFEFF', ' ', '\r', '\n', '\t');
+            if (text.StartsWith('{')) return text;
             if (!data.AsSpan().StartsWith(Header))
                 return DecryptLegacy(data, string.IsNullOrEmpty(passphrase) ? "splate_pass" : passphrase);
             if (data.Length < 52) throw new InvalidDataException("Файл резервной копии обрезан.");
