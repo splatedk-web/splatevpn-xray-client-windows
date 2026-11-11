@@ -23,6 +23,7 @@
   <a href="#скриншоты">Скриншоты</a> ·
   <a href="#быстрый-старт">Быстрый старт</a> ·
   <a href="https://github.com/splatedk-web/splatevpn-xray-client">Версия для Android</a> ·
+  <a href="https://github.com/splatedk-web/splatevpn-xray-client-linux">Версия для Linux</a> ·
   <a href="https://github.com/splatedk-web/splatevpn-xray-client-windows/issues">Сообщить об ошибке</a>
 </p>
 
